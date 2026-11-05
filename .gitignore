@@ -1,0 +1,72 @@
+# ---- macOS ----
+.DS_Store
+.AppleDouble
+.LSOverride
+.Icon?
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# ---- 编辑器 / IDE ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.iml
+.history/
+
+# ---- 环境变量 / 密钥 ----
+.env
+.env.*
+!.env.example
+
+# ---- 日志与临时文件 ----
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+
+# ---- Node.js ----
+node_modules/
+dist/
+build/
+out/
+coverage/
+.npm/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- 构建产物 / 系统 ----
+*.o
+*.a
+*.so
+*.dylib
+.DS_Store?
+
+# ---- SnapLine ----
+# 个人照片不进入版本库，只保留文件夹说明
+photos/*
+!photos/README.md
+
+# npm 打包产物
+*.tgz

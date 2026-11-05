@@ -1,0 +1,54 @@
+{
+  "name": "snap-line",
+  "version": "1.1.0",
+  "description": "Hangs a clothesline of polaroid photos under the message composer in DeepSeek Harness.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "deepseek-harness",
+    "clothesline",
+    "polaroid",
+    "photo",
+    "decoration"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitee.com/Lhuo/ds-snap-line.git"
+  },
+  "homepage": "https://gitee.com/Lhuo/ds-snap-line",
+  "bugs": {
+    "url": "https://gitee.com/Lhuo/ds-snap-line/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "scripts": {
+    "check": "node --check index.js && node --check client.js && node --check lib/photos.js && node --test",
+    "test": "node --test"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+    }
+  }
+}

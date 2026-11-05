@@ -1,0 +1,8 @@
+# SnapLine bundle layer.
+# The Host half is the plugin row below; the Client half is declared by
+# `dsh.client` in package.json and loaded automatically by the web runtime.
+# `name` is the npm package name, so this file works for a linked local
+# checkout as well as for an installed (npm / git) package.
+- insert:
+    - id: snap-line
+      name: 'snap-line'
