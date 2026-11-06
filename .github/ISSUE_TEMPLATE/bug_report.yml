@@ -1,0 +1,57 @@
+name: Bug report
+description: 报告一个 SnapLine 的问题 / Report a problem with SnapLine
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请尽量补齐下面的信息，便于定位问题。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么 / What happened
+      description: 描述实际表现，以及你期望的表现。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: |
+        1. 打开 ...
+        2. 点击 ...
+        3. 看到 ...
+    validations:
+      required: true
+
+  - type: input
+    id: harness-version
+    attributes:
+      label: DeepSeek Harness 版本
+      description: 设置 → 关于，或 `~/.dsh/dsh-runtimes/*/runtime.json` 中的 desktopVersion
+      placeholder: 例如 0.2.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-style
+    attributes:
+      label: 安装方式 / Install style
+      options:
+        - GitHub 仓库安装 / install_bundle with GitHub URL
+        - 本地 clone + link / local clone linked
+        - npm
+        - 其他 / other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图 / Logs or screenshots
+      description: 浏览器控制台、Harness 日志，或界面截图。
+      render: shell
+    validations:
+      required: false

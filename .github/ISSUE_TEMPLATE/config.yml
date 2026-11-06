@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Gitee 镜像 / Gitee mirror
+    url: https://gitee.com/Lhuo/ds-snap-line/issues
+    about: 也可以到 Gitee 镜像仓库提交 issue。

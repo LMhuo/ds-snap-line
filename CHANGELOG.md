@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-06
+
 ### Added
 
 - Hovering a photo nudges it: a short CSS `:hover` animation layered on top of
@@ -20,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   motion` skips the fade/pop.
 - The photo frames now always accept pointer events (for click-to-enlarge);
   the wrapper still stays `pointer-events: none`, so only the pictures react.
+
+### Changed
+
+- Reworked the documentation for the public GitHub release: this README is now
+  the Chinese primary document with a full English version in `README.en.md`,
+  plus a preview image, install options and an FAQ.
+- Added GitHub Actions CI (Node 20 / 22 / 24), issue and pull-request templates,
+  and filled in the GitHub repository/homepage/issue URLs in `package.json`.
+- Declared `engines.dsh: ^0.2.0` (and `dsh.manifestVersion: 1`) so Harness skips
+  the bundle on incompatible releases instead of loading it half-working.
+- Added a rendered preview image (`docs/images/preview.png`) and included
+  `docs/images` in the npm package so the README image also resolves there.
+
 
 ## [1.1.0] - 2026-11-05
 

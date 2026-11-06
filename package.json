@@ -1,9 +1,10 @@
 {
   "name": "snap-line",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Hangs a clothesline of polaroid photos under the message composer in DeepSeek Harness.",
   "type": "module",
   "license": "MIT",
+  "author": "LMhuo (https://github.com/LMhuo)",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -16,14 +17,15 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://gitee.com/Lhuo/ds-snap-line.git"
+    "url": "git+https://github.com/LMhuo/ds-snap-line.git"
   },
-  "homepage": "https://gitee.com/Lhuo/ds-snap-line",
+  "homepage": "https://github.com/LMhuo/ds-snap-line#readme",
   "bugs": {
-    "url": "https://gitee.com/Lhuo/ds-snap-line/issues"
+    "url": "https://github.com/LMhuo/ds-snap-line/issues"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20",
+    "dsh": "^0.2.0"
   },
   "exports": {
     ".": "./index.js",
@@ -37,13 +39,15 @@
     "client.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg"
+    "icon.svg",
+    "docs/images"
   ],
   "scripts": {
     "check": "node --check index.js && node --check client.js && node --check lib/photos.js && node --test",
     "test": "node --test"
   },
   "dsh": {
+    "manifestVersion": 1,
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
       "platform": "web",

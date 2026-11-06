@@ -1,47 +1,74 @@
 # SnapLine
 
-> 一条挂在消息输入框下方的照片晾衣绳。
+> 一条挂在 DeepSeek Harness 消息输入框下方的照片晾衣绳。
 
-SnapLine 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的界面插件（bundle）。它会在聊天输入框下方画一条微微下垂的晾衣绳，夹上一排拍立得照片，照片随风轻轻摆动。
+**中文** · [English](README.en.md)
 
-默认是五张手绘小画；把照片放进 `photos/` 文件夹，就会换成你自己的照片，几秒内自动刷新，无需重启。
+[![CI](https://github.com/LMhuo/ds-snap-line/actions/workflows/ci.yml/badge.svg)](https://github.com/LMhuo/ds-snap-line/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](package.json)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-4d6bfe)](https://github.com/deepseek-ai)
+
+SnapLine 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的界面插件（bundle）。它在聊天输入框下方画一条微微下垂的晾衣绳，夹上一排拍立得照片，照片随风轻轻摆动。默认是五张手绘小画；把照片放进 `photos/` 文件夹，就会换成你自己的照片，几秒内自动刷新，无需重启。
+
+![SnapLine 预览](docs/images/preview.png)
+
+## 目录
+
+- [特性](#特性)
+- [安装](#安装)
+- [使用自己的照片](#使用自己的照片)
+- [工作原理](#工作原理)
+- [开发](#开发)
+- [兼容性](#兼容性)
+- [常见问题](#常见问题)
+- [贡献](#贡献)
+- [更新日志](#更新日志)
+- [License](#license)
 
 ## 特性
 
-- 挂在 `conversation.composer.dock` 插槽里，紧贴消息输入框下方，不遮挡任何操作；
-- 新会话首页（空白 Hero）同样生效：Host 在该状态下不渲染 composer dock，Client 半改用 `shell.overlay` 加 `react-dom` portal，把同一条晾衣绳挂进 Hero 输入框下方的空位；Hero 版比会话页大一倍（600px），并按输入框实际宽度封顶，会话页 dock 版尺寸不变；
-- 支持 `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`，按文件名自然排序；
-- 最多显示 6 张，超过时均匀抽样，照片越多排得越密；
-- 每张照片有独立的倾斜角度和摆动节奏，并尊重 `prefers-reduced-motion`；
-- 鼠标悬停到照片上时轻轻晃一下再回正；交互只用 CSS `:hover` 和 `transform`，没有 JS 监听、没有 React 重渲染，也不触发重排；
-- 点击照片打开灯箱：用户照片按原始比例完整放大，内置插画放大成一张拍立得；按 `Esc`、点背景或点右上角都可以关闭；灯箱经 `react-dom` portal 挂到 `body`，不受 dock/hero 布局裁剪，关闭时不产生任何残留；
-- 零运行时依赖、纯 ESM、无构建步骤；
-- 照片只在本机由 Host 半读取，经 Harness web server 的同源路由提供，不出本机。
+- **两个位置都会出现**：既挂在会话页的 `conversation.composer.dock` 插槽里（紧贴输入框下方、不遮挡操作），也出现在新会话首页的空白 Hero 里；
+- **自带五张手绘插画**：`photos/` 为空时使用内置插画，不会出现空荡荡的绳子；
+- **换成自己的照片**：支持 `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`，按文件名自然排序，增删后 5 秒内自动刷新；
+- **排版自适应**：最多显示 6 张，超过时均匀抽样；照片越多排得越密，每张有自己的倾斜角度与摆动节奏；
+- **交互克制**：悬停时轻轻晃一下再回正，点击打开灯箱预览；只用 CSS `:hover`、`transform` 与 `react-dom` portal，没有 JS 监听、没有多余重渲染；
+- **尊重系统偏好**：`prefers-reduced-motion` 开启时不做摆动动画；
+- **零运行时依赖**：纯 ESM、无构建步骤，`react` / `react-dom` 复用 Harness 内置模块；
+- **照片不出本机**：Host 半通过 Harness web server 的同源路由提供图片，插件不发起任何外部请求。
 
 ## 安装
 
-### 让 Harness 安装（推荐）
+SnapLine 是 Harness 的 bundle 插件，安装由 Harness 里的 Agent 通过 `plugin_manager` 完成。
 
-把这个仓库的地址交给 Harness Agent，让它用 `plugin_manager` 的 `install_bundle` 安装：
+### 方式一：交给 Harness Agent 安装（推荐）
 
-- Git 仓库：`https://gitee.com/Lhuo/ds-snap-line.git`
-- npm（发布后）：`snap-line`
+把仓库地址发给 Harness Agent，并让它用 `plugin_manager` 的 `install_bundle` 安装：
 
-安装完成后，插件会出现在 Harness 的插件列表里，并自动在输入框下方生效。
-
-### 从本地目录安装（开发用）
-
-```bash
-git clone https://gitee.com/Lhuo/ds-snap-line.git
-# 然后让 Harness 安装这个目录的绝对路径：
-# plugin_manager install_bundle，target = /path/to/ds-snap-line
+```text
+https://github.com/LMhuo/ds-snap-line.git
 ```
 
-`install_bundle` 会在当前 profile 的 `package.json` 中写入 `link:` 依赖并把它加入 bundle 列表，无需手动改 profile 文件。
+也支持 `github:Lhuo/ds-snap-line` 简写。DSH 会先用 pnpm 把它装进当前 profile，再按 `dsh.bundle.patch` 组合 Host 半、按 `dsh.client` 加载 Client 半。
+
+安装成功后，插件会出现在 Harness 的插件列表（`~/.dsh/profiles/<profile>/package.json` 的 bundle 列表）里，并自动在输入框下方生效。
+
+### 方式二：本地克隆后安装（开发 / 调试推荐）
+
+```bash
+git clone https://github.com/LMhuo/ds-snap-line.git
+```
+
+然后让 Harness Agent 用 `plugin_manager` 的 `install_bundle` 安装这个目录的**绝对路径**。`install_bundle` 会在当前 profile 的 `package.json` 中写入 `link:` 依赖并加入 bundle 列表，无需手动改 profile 文件。
+
+### 方式三：npm（尚未发布）
+
+包名预留为 `snap-line`，发布后可直接 `install_bundle` 安装 `snap-line`。目前请使用前两种方式。
 
 ### 停用与卸载
 
-在 Harness 的插件设置里停用即可；也可以在 Agent 中调用 `plugin_manager` 的 `set_bundle`（停用/启用）或 `remove_bundle`（移除）。
+- 在 Harness 的插件设置里停用；
+- 或让 Agent 调用 `plugin_manager` 的 `set_bundle`（停用 / 启用）与 `remove_bundle`（移除）。
 
 ## 使用自己的照片
 
@@ -50,71 +77,100 @@ git clone https://gitee.com/Lhuo/ds-snap-line.git
 | 安装方式 | 照片目录 |
 | --- | --- |
 | 本地目录 / `link:` 安装 | 本仓库的 `photos/` |
-| npm / git 安装 | `~/.dsh/profiles/<profile>/node_modules/snap-line/photos/` |
+| GitHub / npm 安装 | `~/.dsh/profiles/<profile>/node_modules/snap-line/photos/` |
 
 把图片放进去即可：
 
-- 按文件名自然排序（`1.jpg`、`2.jpg`、`10.jpg` 顺序正确）；
+- 按文件名自然排序（`1.jpg`、`2.jpg`、`10.jpg` 顺序正确），中文文件名同样支持；
 - 最多显示 6 张，更多照片会均匀抽取 6 张；
 - 增删或替换后 5 秒内自动刷新，无需重启 Harness；
 - 清空文件夹会恢复插件内置的插画照片。
 
-> `photos/` 中的照片不会进入 Git，也不会被打进 npm 包（见 `.gitignore` 和 `package.json` 的 `files`），可以放心放私人照片；但请注意，照片会由本机 Harness 端口提供，能访问该端口的本机进程可以看到它们。
+> **隐私**：`photos/` 中的照片不会进入 Git，也不会被打进 npm 包（见 `.gitignore` 与 `package.json` 的 `files`），可以放心放私人照片。照片只由本机 Harness 端口提供，插件不会上传；但能访问该端口的本机进程可以看到这些图片。
 
 ## 工作原理
 
-```
-photos/  ──Host 半 (index.js)──GET /snap-line/photos.json──┐
-                                                           ├──Client 半 (client.js)
-photos/<name> ──GET /snap-line/photos/<name>───────────────┘    └── SVG 晾衣绳 + 拍立得相框
+```text
+photos/ ──Host 半 (index.js)── GET /snap-line/photos.json ──┐
+                                                            ├── Client 半 (client.js)
+photos/<name> ── GET /snap-line/photos/<name> ──────────────┘    └── SVG 晾衣绳 + 拍立得相框
 ```
 
-- **Host 半**（`index.js`）：用 `webServer.register({ kind: 'prefix', path: '/snap-line' })` 提供照片清单与图片；拒绝目录穿越、隐藏文件名和未知媒体类型。
-- **Client 半**（`client.js`）：注册到 `conversation.composer.dock` 插槽（`order: 2`），每 5 秒轮询一次清单；有照片时用 `<image>` 渲染，没有照片时画 5 张内置插画。
-- **新会话首页**：Host 只在有 Session 时渲染 `conversation.composer.dock`，空白 Hero 里只有一个空的 `[data-composer-dock]` 容器。Client 半额外向 `shell.overlay` 注册一个 `HeroClothesline`：它每 250ms 检查页面里是否存在 `[data-content-phase="hero"] [data-composer-dock]` 且其中还没有 dock 版晾衣绳，若有则通过 `react-dom` 的 `createPortal` 把同一条晾衣绳画进这个容器，并按量到的输入框宽度把它放大到 2 倍（600px 封顶）；一旦进入正常会话、dock 版出现，它就自动让位，不会重复显示。`react-dom` 属于 Harness 的基础模块表，无需额外声明依赖；拿不到 `react-dom` 或 `shell.overlay` 时该兜底会静默跳过，不影响正常的 dock 渲染。
-- dock 插槽本身是 fit-content 的 flex 行，SVG 的 `width: 100%` 会退回固有 300px，所以会话页晾衣绳一直是 300px 左右；Hero 版因此改用显式像素宽度，而不是改 `max-width`。
-- 只有本机 Harness 端口能访问这个路由，插件不发任何外部请求。
+- **Host 半**（`index.js`）：用 `webServer.register({ kind: 'prefix', path: '/snap-line' })` 提供照片清单与图片。`lib/photos.js` 是纯 Node 实现，拒绝目录穿越、隐藏文件名和未知媒体类型，可独立测试；
+- **Client 半**（`client.js`）：注册到 `conversation.composer.dock` 插槽（`order: 2`），每 5 秒轮询一次清单，按清单渲染照片或内置插画；
+- **新会话首页**：Host 只在有 Session 时渲染 `conversation.composer.dock`，空白 Hero 里只有一个空的 `[data-composer-dock]` 容器。Client 半额外向 `shell.overlay` 注册 `HeroClothesline`，每 250ms 检查页面里是否存在 `[data-content-phase="hero"] [data-composer-dock]`，若有则通过 `react-dom` 的 `createPortal` 把同一条晾衣绳画进该容器，并按量到的输入框宽度放大到 2 倍（600px 封顶）。进入正常会话、dock 版出现后自动让位，不会重复显示；拿不到 `react-dom` 或 `shell.overlay` 时静默跳过，不影响 dock 渲染；
+- dock 插槽本身是 fit-content 的 flex 行，SVG 的 `width: 100%` 会退回固有 300px，所以会话页晾衣绳一直是 300px 左右；Hero 版因此使用显式像素宽度，而不是改 `max-width`。
 
 ## 开发
 
 ```bash
-npm test       # node --test，覆盖照片清单、静态文件路由、清单一致性
+npm test       # node --test：照片清单、静态文件路由、清单一致性等 17 项用例
 npm run check  # 语法检查 + 全部测试
 ```
 
-没有构建步骤，也没有运行时依赖。修改 `client.js` 会通过 HMR 自动刷新浏览器半；修改 `index.js` 后需要重启插件条目（停用再启用）。
+没有构建步骤，也没有运行时依赖。修改 `client.js` 会通过 HMR 自动刷新浏览器半；修改 `index.js` 后需要在插件设置里停用再启用一次。
+
+本地调试时推荐用上面的「方式二」以 `link:` 方式安装本仓库，这样改代码即时生效。
 
 ### 目录结构
 
-```
-snap-line/
+```text
+ds-snap-line/
 ├── index.js            # Host 半：注册 /snap-line 前缀路由
 ├── lib/photos.js       # 照片清单 / 读取 / 路由资源（纯 Node，可单独测试）
-├── client.js           # Client 半：晾衣绳 SVG 与插槽注册
+├── client.js           # Client 半：晾衣绳 SVG、插槽注册、灯箱
 ├── cordis.patch.yml    # bundle 插入的 Host 插件行
-├── locale/             # 插件管理器中显示的标题与描述
+├── locale/             # 插件管理器中显示的中英文标题与描述
 ├── icon.svg            # 插件图标
 ├── photos/             # 你自己的照片（默认不提交）
-└── test/               # node:test 测试
-```
-
-## 发布
-
-```bash
-npm pack --dry-run   # 先确认打包内容（photos/ 不应出现在列表里）
-npm publish          # 发布到 npm，包名 snap-line
-git push origin master
+├── docs/images/        # README 预览图等静态资源
+├── test/               # node:test 测试
+└── .github/workflows/  # GitHub Actions CI
 ```
 
 ## 兼容性
 
-- DeepSeek Harness 0.2.x（Web 平台）
-- Node.js ≥ 20
+| 项目 | 要求 |
+| --- | --- |
+| DeepSeek Harness | 0.2.x（Web 平台；开发验证于 0.2.2） |
+| Node.js | ≥ 20（仅开发与测试需要，运行时使用 Harness 内置 Node） |
+| 插件形态 | bundle（`package.json` 的 `dsh` 字段 + `cordis.patch.yml`） |
+
+插件在 `package.json` 的 `engines.dsh` 中声明 `^0.2.0`：Harness 低于该范围时会跳过加载，避免在不兼容的版本上出错。需要更宽的兼容性时，可以用 profile 的 `compatibility.json` 做版本豁免。
+
+## 常见问题
+
+**放了照片但晾衣绳上没有变化？**
+先确认照片放进了上表对应的 `photos/` 目录，再等 5 秒（轮询间隔）。检查扩展名是否在支持列表内、文件名是否以 `.` 开头（隐藏文件会被忽略）。超过 6 张时只会均匀显示 6 张。
+
+**照片会被上传或公开吗？**
+不会。Photo 由本机 Harness web server 的同源路由提供，插件不发外部请求，也不会把照片写进 Git 或 npm 包。
+
+**会挡住消息输入框的点击吗？**
+不会。外层容器是 `pointer-events: none`，只有照片本身恢复指针事件，用于悬停与点击灯箱。
+
+**可以改照片数量或尺寸吗？**
+可以，在 `client.js` 中调整 `MAX_PHOTOS`（数量）、`HERO_SVG_WIDTH`（Hero 版宽度）、`TILTS` / `DELAYS` / `DURATIONS`（倾斜与摆动节奏）。
+
+**支持深色主题吗？**
+目前使用固定的暖色纸张配色，不随 Harness 主题切换；欢迎提交 PR。
+
+**怎么升级到新版本？**
+Git 方式安装没有版本列表：让 Agent 重新用 `install_bundle` 安装最新提交，或先 `remove_bundle` 再安装。每个版本的变更见 [CHANGELOG.md](CHANGELOG.md)。
+
+**可以商用吗？**
+可以，MIT 协议。
+
+## 贡献
+
+- 发现 bug、想要新功能：欢迎开 issue，尽量附上 Harness 版本、安装方式与复现步骤；
+- 提交代码：先 `npm run check` 保证 17 项测试通过，再发起 PR；
+- 本项目同时镜像在 [Gitee](https://gitee.com/Lhuo/ds-snap-line)，两边都可以提 issue。
+
+## 更新日志
+
+见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## License
 
-MIT © 2026 Lhuo
-
-## English
-
-SnapLine is a DeepSeek Harness UI bundle that hangs a sagging clothesline of polaroid photos under the message composer. It ships five hand-drawn placeholder photos; drop your own images (`.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`) into `photos/` and they replace the illustrations within seconds. Up to six photos are shown, evenly sampled, each with its own tilt and sway. Hovering a photo gives it a small, transform-only nudge that settles back into the ambient sway — no JS listeners or re-renders. Clicking a photo opens a portal lightbox with the full-size image (built-in illustrations open as an enlarged polaroid); close it with `Esc`, a backdrop click or the × button. The clothesline also appears on the New Session home page: because the Host does not render `conversation.composer.dock` in the blank Hero, the Client half portals the same artwork through `shell.overlay` into the Hero composer's empty dock container. Install by pointing `plugin_manager`'s `install_bundle` at this repository; photos never leave the local machine and are served by the Host half over the Harness web server at `/snap-line/photos/…`.
+[MIT](LICENSE) © 2026 Lhuo

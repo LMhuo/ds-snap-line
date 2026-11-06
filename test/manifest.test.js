@@ -96,3 +96,29 @@ test('photos folder keeps a tracked placeholder', async () => {
   assert.match(note, /照片/)
   assert.match(note, /\.jpg/)
 })
+
+test('package metadata points at the public GitHub repository', async () => {
+  const pkg = JSON.parse(await read('package.json'))
+  assert.equal(pkg.engines.dsh, '^0.2.0')
+  assert.equal(pkg.repository.url, 'git+https://github.com/LMhuo/ds-snap-line.git')
+  assert.equal(pkg.homepage, 'https://github.com/LMhuo/ds-snap-line#readme')
+  assert.equal(pkg.bugs.url, 'https://github.com/LMhuo/ds-snap-line/issues')
+  assert.ok(pkg.files.includes('docs/images'), 'README preview must ship in the package')
+})
+
+test('documentation ships a Chinese primary README and an English one', async () => {
+  const zh = await read('README.md')
+  const en = await read('README.en.md')
+  assert.match(zh, /docs\/images\/preview\.png/)
+  assert.match(en, /docs\/images\/preview\.png/)
+  assert.match(zh, /README\.en\.md/)
+  assert.match(en, /README\.md/)
+  const png = await readFile(join(root, 'docs/images/preview.png'))
+  assert.equal(png.subarray(1, 4).toString('latin1'), 'PNG')
+})
+
+test('GitHub Actions runs the same check as a local build', async () => {
+  const ci = await read('.github/workflows/ci.yml')
+  assert.match(ci, /npm run check/)
+  assert.match(ci, /node-version:/)
+})
