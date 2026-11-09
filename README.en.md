@@ -63,7 +63,7 @@ Then ask the Harness agent to install that directory's **absolute path** with `i
 
 ### Option 3: npm (not published yet)
 
-The package name is reserved as `dsh-snap-line`. Once published, `install_bundle` can take that name; until then use option 1 or 2.
+The planned package name is `dsh-snap-line` — it is not reserved or published on npm yet. Once published, `install_bundle` can take that name; until then use option 1 or 2.
 
 ### Disable and remove
 

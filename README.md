@@ -63,7 +63,7 @@ git clone https://github.com/LMhuo/dsh-snap-line.git
 
 ### 方式三：npm（尚未发布）
 
-包名预留为 `dsh-snap-line`，发布后可直接 `install_bundle` 安装 `dsh-snap-line`。目前请使用前两种方式。
+包名计划使用 `dsh-snap-line`（npm registry 上尚未发布，也还没有占位）。发布后可直接用 `install_bundle` 安装 `dsh-snap-line`；在那之前请使用前两种方式。
 
 ### 停用与卸载
 
