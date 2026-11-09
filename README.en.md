@@ -4,7 +4,7 @@
 
 [中文](README.md) · **English**
 
-[![CI](https://github.com/LMhuo/ds-snap-line/actions/workflows/ci.yml/badge.svg)](https://github.com/LMhuo/ds-snap-line/actions/workflows/ci.yml)
+[![CI](https://github.com/LMhuo/dsh-snap-line/actions/workflows/ci.yml/badge.svg)](https://github.com/LMhuo/dsh-snap-line/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](package.json)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-4d6bfe)](https://github.com/deepseek-ai)
@@ -46,24 +46,24 @@ SnapLine is a Harness bundle, so installation is done by an agent inside Harness
 Send the repository URL to the Harness agent and ask it to install the bundle with `plugin_manager`'s `install_bundle`:
 
 ```text
-https://github.com/LMhuo/ds-snap-line.git
+https://github.com/LMhuo/dsh-snap-line.git
 ```
 
-The `github:Lhuo/ds-snap-line` shorthand works too. DSH installs it into the current profile with pnpm, then composes the Host half from `dsh.bundle.patch` and loads the Client half from `dsh.client`.
+The `github:Lhuo/dsh-snap-line` shorthand works too. DSH installs it into the current profile with pnpm, then composes the Host half from `dsh.bundle.patch` and loads the Client half from `dsh.client`.
 
 When it finishes, the plugin appears in Harness's plugin list (the bundle list in `~/.dsh/profiles/<profile>/package.json`) and starts rendering under the composer.
 
 ### Option 2: clone locally, then install (best for development)
 
 ```bash
-git clone https://github.com/LMhuo/ds-snap-line.git
+git clone https://github.com/LMhuo/dsh-snap-line.git
 ```
 
 Then ask the Harness agent to install that directory's **absolute path** with `install_bundle`. It writes a `link:` dependency into the current profile's `package.json` and adds it to the bundle list — no manual profile editing.
 
 ### Option 3: npm (not published yet)
 
-The package name is reserved as `snap-line`. Once published, `install_bundle` can take that name; until then use option 1 or 2.
+The package name is reserved as `dsh-snap-line`. Once published, `install_bundle` can take that name; until then use option 1 or 2.
 
 ### Disable and remove
 
@@ -77,7 +77,7 @@ The photo folder is **`photos/` inside the plugin package**:
 | Install style | Photo folder |
 | --- | --- |
 | Local directory / `link:` | `photos/` in this repository |
-| GitHub / npm install | `~/.dsh/profiles/<profile>/node_modules/snap-line/photos/` |
+| GitHub / npm install | `~/.dsh/profiles/<profile>/node_modules/dsh-snap-line/photos/` |
 
 Drop images in and that's it:
 
@@ -91,12 +91,12 @@ Drop images in and that's it:
 ## How it works
 
 ```text
-photos/ ── Host half (index.js) ── GET /snap-line/photos.json ──┐
-                                                                ├── Client half (client.js)
-photos/<name> ── GET /snap-line/photos/<name> ──────────────────┘    └── SVG clothesline + polaroid frames
+photos/ ── Host half (index.js) ── GET /dsh-snap-line/photos.json ──┐
+                                                                    ├── Client half (client.js)
+photos/<name> ── GET /dsh-snap-line/photos/<name> ──────────────────┘    └── SVG clothesline + polaroid frames
 ```
 
-- **Host half** (`index.js`): registers a `kind: 'prefix'` route at `/snap-line` for the photo manifest and the images. `lib/photos.js` is plain Node and rejects path traversal, hidden filenames and unknown media types, so it is unit-testable on its own;
+- **Host half** (`index.js`): registers a `kind: 'prefix'` route at `/dsh-snap-line` for the photo manifest and the images. `lib/photos.js` is plain Node and rejects path traversal, hidden filenames and unknown media types, so it is unit-testable on its own;
 - **Client half** (`client.js`): registers in the `conversation.composer.dock` slot (`order: 2`) and polls the manifest every five seconds, rendering user photos or the built-in illustrations;
 - **New Session hero**: the Host renders `conversation.composer.dock` only for an active Session, so the blank hero has just an empty `[data-composer-dock]` container. The Client half also registers `HeroClothesline` on `shell.overlay`, checks every 250 ms for `[data-content-phase="hero"] [data-composer-dock]`, and portals the same clothesline into it via `react-dom`'s `createPortal`, scaled to 2× the measured composer width (capped at 600px). Once a real conversation mounts its dock entry, the hero copy steps aside; if `react-dom` or `shell.overlay` is unavailable it silently skips, leaving the normal dock rendering intact;
 - the dock slot is a fit-content flex row, so an SVG with `width: 100%` collapses to its intrinsic 300px — the conversation clothesline stays ~300px wide. The hero copy therefore uses an explicit pixel width instead of `max-width`.
@@ -104,7 +104,7 @@ photos/<name> ── GET /snap-line/photos/<name> ──────────
 ## Development
 
 ```bash
-npm test       # node --test: photo listing, file route, manifest consistency — 17 tests
+npm test       # node --test: photo listing, file route, manifest consistency — all tests
 npm run check  # syntax check + full test suite
 ```
 
@@ -115,8 +115,8 @@ For local debugging, install this repository as a `link:` bundle (option 2) so e
 ### Repository layout
 
 ```text
-ds-snap-line/
-├── index.js            # Host half: registers the /snap-line prefix route
+dsh-snap-line/
+├── index.js            # Host half: registers the /dsh-snap-line prefix route
 ├── lib/photos.js       # Photo listing / reading / route resource (plain Node, unit-tested)
 ├── client.js           # Client half: clothesline SVG, slot registration, lightbox
 ├── cordis.patch.yml    # Host plugin row inserted by the bundle
@@ -164,8 +164,8 @@ Yes, under the MIT license.
 ## Contributing
 
 - Bugs and feature requests: open an issue with your Harness version, install style and reproduction steps;
-- Code: run `npm run check` first so all 17 tests pass, then open a PR;
-- The project is also mirrored on [Gitee](https://gitee.com/Lhuo/ds-snap-line); issues are welcome in either place.
+- Code: run `npm run check` first so all tests pass, then open a PR;
+- The project is also mirrored on [Gitee](https://gitee.com/Lhuo/dsh-snap-line); issues are welcome in either place.
 
 ## Changelog
 

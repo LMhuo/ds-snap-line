@@ -4,7 +4,7 @@
 
 **中文** · [English](README.en.md)
 
-[![CI](https://github.com/LMhuo/ds-snap-line/actions/workflows/ci.yml/badge.svg)](https://github.com/LMhuo/ds-snap-line/actions/workflows/ci.yml)
+[![CI](https://github.com/LMhuo/dsh-snap-line/actions/workflows/ci.yml/badge.svg)](https://github.com/LMhuo/dsh-snap-line/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](package.json)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-4d6bfe)](https://github.com/deepseek-ai)
@@ -46,24 +46,24 @@ SnapLine 是 Harness 的 bundle 插件，安装由 Harness 里的 Agent 通过 `
 把仓库地址发给 Harness Agent，并让它用 `plugin_manager` 的 `install_bundle` 安装：
 
 ```text
-https://github.com/LMhuo/ds-snap-line.git
+https://github.com/LMhuo/dsh-snap-line.git
 ```
 
-也支持 `github:Lhuo/ds-snap-line` 简写。DSH 会先用 pnpm 把它装进当前 profile，再按 `dsh.bundle.patch` 组合 Host 半、按 `dsh.client` 加载 Client 半。
+也支持 `github:Lhuo/dsh-snap-line` 简写。DSH 会先用 pnpm 把它装进当前 profile，再按 `dsh.bundle.patch` 组合 Host 半、按 `dsh.client` 加载 Client 半。
 
 安装成功后，插件会出现在 Harness 的插件列表（`~/.dsh/profiles/<profile>/package.json` 的 bundle 列表）里，并自动在输入框下方生效。
 
 ### 方式二：本地克隆后安装（开发 / 调试推荐）
 
 ```bash
-git clone https://github.com/LMhuo/ds-snap-line.git
+git clone https://github.com/LMhuo/dsh-snap-line.git
 ```
 
 然后让 Harness Agent 用 `plugin_manager` 的 `install_bundle` 安装这个目录的**绝对路径**。`install_bundle` 会在当前 profile 的 `package.json` 中写入 `link:` 依赖并加入 bundle 列表，无需手动改 profile 文件。
 
 ### 方式三：npm（尚未发布）
 
-包名预留为 `snap-line`，发布后可直接 `install_bundle` 安装 `snap-line`。目前请使用前两种方式。
+包名预留为 `dsh-snap-line`，发布后可直接 `install_bundle` 安装 `dsh-snap-line`。目前请使用前两种方式。
 
 ### 停用与卸载
 
@@ -77,7 +77,7 @@ git clone https://github.com/LMhuo/ds-snap-line.git
 | 安装方式 | 照片目录 |
 | --- | --- |
 | 本地目录 / `link:` 安装 | 本仓库的 `photos/` |
-| GitHub / npm 安装 | `~/.dsh/profiles/<profile>/node_modules/snap-line/photos/` |
+| GitHub / npm 安装 | `~/.dsh/profiles/<profile>/node_modules/dsh-snap-line/photos/` |
 
 把图片放进去即可：
 
@@ -91,12 +91,12 @@ git clone https://github.com/LMhuo/ds-snap-line.git
 ## 工作原理
 
 ```text
-photos/ ──Host 半 (index.js)── GET /snap-line/photos.json ──┐
-                                                            ├── Client 半 (client.js)
-photos/<name> ── GET /snap-line/photos/<name> ──────────────┘    └── SVG 晾衣绳 + 拍立得相框
+photos/ ──Host 半 (index.js)── GET /dsh-snap-line/photos.json ──┐
+                                                                ├── Client 半 (client.js)
+photos/<name> ── GET /dsh-snap-line/photos/<name> ──────────────┘    └── SVG 晾衣绳 + 拍立得相框
 ```
 
-- **Host 半**（`index.js`）：用 `webServer.register({ kind: 'prefix', path: '/snap-line' })` 提供照片清单与图片。`lib/photos.js` 是纯 Node 实现，拒绝目录穿越、隐藏文件名和未知媒体类型，可独立测试；
+- **Host 半**（`index.js`）：用 `webServer.register({ kind: 'prefix', path: '/dsh-snap-line' })` 提供照片清单与图片。`lib/photos.js` 是纯 Node 实现，拒绝目录穿越、隐藏文件名和未知媒体类型，可独立测试；
 - **Client 半**（`client.js`）：注册到 `conversation.composer.dock` 插槽（`order: 2`），每 5 秒轮询一次清单，按清单渲染照片或内置插画；
 - **新会话首页**：Host 只在有 Session 时渲染 `conversation.composer.dock`，空白 Hero 里只有一个空的 `[data-composer-dock]` 容器。Client 半额外向 `shell.overlay` 注册 `HeroClothesline`，每 250ms 检查页面里是否存在 `[data-content-phase="hero"] [data-composer-dock]`，若有则通过 `react-dom` 的 `createPortal` 把同一条晾衣绳画进该容器，并按量到的输入框宽度放大到 2 倍（600px 封顶）。进入正常会话、dock 版出现后自动让位，不会重复显示；拿不到 `react-dom` 或 `shell.overlay` 时静默跳过，不影响 dock 渲染；
 - dock 插槽本身是 fit-content 的 flex 行，SVG 的 `width: 100%` 会退回固有 300px，所以会话页晾衣绳一直是 300px 左右；Hero 版因此使用显式像素宽度，而不是改 `max-width`。
@@ -104,7 +104,7 @@ photos/<name> ── GET /snap-line/photos/<name> ──────────
 ## 开发
 
 ```bash
-npm test       # node --test：照片清单、静态文件路由、清单一致性等 17 项用例
+npm test       # node --test：照片清单、静态文件路由、清单一致性等全部用例
 npm run check  # 语法检查 + 全部测试
 ```
 
@@ -115,8 +115,8 @@ npm run check  # 语法检查 + 全部测试
 ### 目录结构
 
 ```text
-ds-snap-line/
-├── index.js            # Host 半：注册 /snap-line 前缀路由
+dsh-snap-line/
+├── index.js            # Host 半：注册 /dsh-snap-line 前缀路由
 ├── lib/photos.js       # 照片清单 / 读取 / 路由资源（纯 Node，可单独测试）
 ├── client.js           # Client 半：晾衣绳 SVG、插槽注册、灯箱
 ├── cordis.patch.yml    # bundle 插入的 Host 插件行
@@ -164,8 +164,8 @@ Git 方式安装没有版本列表：让 Agent 重新用 `install_bundle` 安装
 ## 贡献
 
 - 发现 bug、想要新功能：欢迎开 issue，尽量附上 Harness 版本、安装方式与复现步骤；
-- 提交代码：先 `npm run check` 保证 17 项测试通过，再发起 PR；
-- 本项目同时镜像在 [Gitee](https://gitee.com/Lhuo/ds-snap-line)，两边都可以提 issue。
+- 提交代码：先 `npm run check` 保证全部测试通过，再发起 PR；
+- 本项目同时镜像在 [Gitee](https://gitee.com/Lhuo/dsh-snap-line)，两边都可以提 issue。
 
 ## 更新日志
 

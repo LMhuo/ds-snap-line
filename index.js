@@ -17,5 +17,5 @@ export function apply(ctx) {
     kind: 'prefix',
     path: ROUTE,
     resource: createPhotoResource(PHOTOS_DIR),
-  }), 'snap-line: photo files')
+  }), 'dsh-snap-line: photo files')
 }

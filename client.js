@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: 'snap-line',
+  id: 'dsh-snap-line',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
@@ -258,7 +258,7 @@ window.__ModuleLoader__.load({
     const DELAYS = ['0s', '-1.8s', '-3.2s', '-0.7s', '-2.5s', '-4.1s'];
     const DURATIONS = ['7.6s', '6.8s', '8.2s', '7.1s', '6.5s', '7.8s'];
     const MAX_PHOTOS = 6;
-    const PHOTO_ENDPOINT = '/snap-line/photos.json';
+    const PHOTO_ENDPOINT = '/dsh-snap-line/photos.json';
     const POLL_INTERVAL_MS = 5000;
 
     /** Evenly spread photo centers along the rope, capped at the old five-photo spacing. */
@@ -429,7 +429,7 @@ window.__ModuleLoader__.load({
       const xs = photoPositions(items.length);
       return h('div', {
         'aria-hidden': 'true',
-        'data-snap-line': source,
+        'data-dsh-snap-line': source,
         style: {
           display: 'flex',
           justifyContent: 'center',
@@ -505,7 +505,7 @@ window.__ModuleLoader__.load({
       let target = null;
       let targetWidth = 0;
       for (const dock of document.querySelectorAll(HERO_DOCK_SELECTOR)) {
-        if (dock.querySelector('[data-snap-line="dock"]') !== null) continue;
+        if (dock.querySelector('[data-dsh-snap-line="dock"]') !== null) continue;
         const content = dock.closest('[data-content-phase="hero"]');
         const width = content === null ? dock.clientWidth : content.getBoundingClientRect().width;
         if (width <= 0) continue;
@@ -558,18 +558,18 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
           name: 'conversation.composer.dock',
-          id: 'snap-line',
+          id: 'dsh-snap-line',
           order: 2,
         }, Clothesline));
         if (createPortal === null) return;
         try {
           ctx.slots.inject('shell.overlay', () => ctx.slots.register({
             name: 'shell.overlay',
-            id: 'snap-line-hero',
+            id: 'dsh-snap-line-hero',
             order: 0,
           }, HeroClothesline));
         } catch (error) {
-          console.warn('snap-line: hero clothesline unavailable', error);
+          console.warn('dsh-snap-line: hero clothesline unavailable', error);
         }
       },
     };

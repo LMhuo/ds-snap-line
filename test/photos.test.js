@@ -11,7 +11,7 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46])
 
 async function makeFixture(t) {
-  const dir = await mkdtemp(join(tmpdir(), 'snap-line-'))
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-snap-line-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   await writeFile(join(dir, 'b.png'), PNG)
   await writeFile(join(dir, 'a.jpg'), JPEG)
@@ -37,7 +37,7 @@ test('listPhotos lists supported images in natural name order', async (t) => {
 })
 
 test('listPhotos treats a missing folder as empty', async () => {
-  const listing = await listPhotos(join(tmpdir(), `snap-line-missing-${process.pid}-${Date.now()}`))
+  const listing = await listPhotos(join(tmpdir(), `dsh-snap-line-missing-${process.pid}-${Date.now()}`))
   assert.deepEqual(listing, { photos: [], revision: 'empty' })
 })
 

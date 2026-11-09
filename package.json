@@ -1,6 +1,6 @@
 {
-  "name": "snap-line",
-  "version": "1.2.0",
+  "name": "dsh-snap-line",
+  "version": "1.3.0",
   "description": "Hangs a clothesline of polaroid photos under the message composer in DeepSeek Harness.",
   "type": "module",
   "license": "MIT",
@@ -17,11 +17,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LMhuo/ds-snap-line.git"
+    "url": "git+https://github.com/LMhuo/dsh-snap-line.git"
   },
-  "homepage": "https://github.com/LMhuo/ds-snap-line#readme",
+  "homepage": "https://github.com/LMhuo/dsh-snap-line#readme",
   "bugs": {
-    "url": "https://github.com/LMhuo/ds-snap-line/issues"
+    "url": "https://github.com/LMhuo/dsh-snap-line/issues"
   },
   "engines": {
     "node": ">=20",

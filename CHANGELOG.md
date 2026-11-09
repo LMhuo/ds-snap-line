@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-09
+
+### Changed
+
+- Renamed the project to `dsh-snap-line`. The npm package name, the bundle
+  patch row, the client module id, the photo route (`/dsh-snap-line`), the
+  slot ids, the DOM attributes and the repository URLs all follow the new
+  name; the user-facing brand stays **SnapLine**. Profiles that installed the
+  plugin under the old name must reinstall it (`remove_bundle`, then
+  `install_bundle`) because the profile dependency key changes.
+
 ## [1.2.0] - 2026-11-06
 
 ### Added

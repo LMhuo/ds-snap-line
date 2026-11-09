@@ -4,5 +4,5 @@
 # `name` is the npm package name, so this file works for a linked local
 # checkout as well as for an installed (npm / git) package.
 - insert:
-    - id: snap-line
-      name: 'snap-line'
+    - id: dsh-snap-line
+      name: 'dsh-snap-line'
