@@ -58,6 +58,7 @@ test('servePhoto returns bytes with the media type and no-sniff header', async (
   assert.equal(response.headers.get('content-type'), 'image/webp')
   assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
   assert.equal(response.headers.get('cache-control'), 'private, max-age=60')
+  assert.equal(response.headers.get('content-length'), String(PNG.length))
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), PNG)
 })
 

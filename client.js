@@ -48,6 +48,15 @@ window.__ModuleLoader__.load({
       .sl-photo {
         pointer-events: auto;
         touch-action: manipulation;
+        cursor: pointer;
+      }
+      .sl-photo:focus {
+        outline: none;
+      }
+      .sl-photo:focus-visible {
+        outline: 2px solid #a98d63;
+        outline-offset: 2px;
+        border-radius: 4px;
       }
       @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
         .sl-photo:hover .sl-wobble {
@@ -110,6 +119,13 @@ window.__ModuleLoader__.load({
       }
       .sl-lightbox-close:hover {
         background: #ffffff;
+      }
+      .sl-lightbox-close:focus {
+        outline: none;
+      }
+      .sl-lightbox-close:focus-visible {
+        outline: 2px solid #f0e2c4;
+        outline-offset: 2px;
       }
       @keyframes sl-lightbox-fade {
         from { opacity: 0; }
@@ -333,11 +349,20 @@ window.__ModuleLoader__.load({
     }
 
     function Photo(props) {
-      const { x, tilt, delay, duration, content, onOpen } = props;
+      const { x, tilt, delay, duration, content, onOpen, label } = props;
+      const onKeyDown = (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
+        event.preventDefault();
+        onOpen();
+      };
       return h('g', {
         className: 'sl-photo',
         transform: 'translate(' + x + ' ' + ropeY(x).toFixed(2) + ')',
+        role: 'button',
+        tabIndex: 0,
+        'aria-label': label,
         onClick: onOpen,
+        onKeyDown,
       },
         h('g', { transform: 'rotate(' + tilt + ')' },
           h('g', { transform: 'scale(' + PHOTO_SCALE + ')' },
@@ -358,19 +383,34 @@ window.__ModuleLoader__.load({
     /** Full-screen viewer opened by clicking a photo; closes on Esc, backdrop or the close button. */
     function Lightbox(props) {
       const { preview, onClose } = props;
+      const closeRef = React.useRef(null);
+      React.useEffect(() => {
+        if (preview === null) return;
+        const previous = document.activeElement;
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        if (closeRef.current !== null) closeRef.current.focus();
+        return () => {
+          document.body.style.overflow = previousOverflow;
+          if (previous !== null && typeof previous.focus === 'function') previous.focus();
+        };
+      }, [preview]);
       if (preview === null) return null;
+      const label = preview.kind === 'photo'
+        ? preview.name || '照片 / Photo'
+        : '照片插画 / Photo illustration';
       const card = preview.kind === 'photo'
         ? h('div', { className: 'sl-lightbox-photo' },
             h('img', {
               src: preview.url,
-              alt: preview.name || '照片',
+              alt: label,
               draggable: 'false',
             }))
         : h('div', { className: 'sl-lightbox-polaroid' },
             h('svg', {
               viewBox: '-31 6 62 80',
               role: 'img',
-              'aria-label': '照片插画',
+              'aria-label': label,
               focusable: 'false',
             },
               frame(preview.content)));
@@ -378,7 +418,12 @@ window.__ModuleLoader__.load({
         className: 'sl-lightbox',
         role: 'dialog',
         'aria-modal': 'true',
-        'aria-label': '照片预览',
+        'aria-label': '照片预览 / Photo preview',
+        onKeyDown: (event) => {
+          if (event.key !== 'Tab') return;
+          event.preventDefault();
+          if (closeRef.current !== null) closeRef.current.focus();
+        },
         onClick: (event) => {
           if (event.target === event.currentTarget) onClose();
         },
@@ -387,8 +432,8 @@ window.__ModuleLoader__.load({
         h('button', {
           type: 'button',
           className: 'sl-lightbox-close',
-          'aria-label': '关闭预览',
-          autoFocus: true,
+          'aria-label': '关闭预览 / Close preview',
+          ref: closeRef,
           onClick: onClose,
         }, '×'),
       );
@@ -428,7 +473,8 @@ window.__ModuleLoader__.load({
         : ILLUSTRATIONS.map((scene) => ({ kind: 'illustration', scene }));
       const xs = photoPositions(items.length);
       return h('div', {
-        'aria-hidden': 'true',
+        role: 'group',
+        'aria-label': '照片晾衣绳 / Photo clothesline',
         'data-dsh-snap-line': source,
         style: {
           display: 'flex',
@@ -443,7 +489,8 @@ window.__ModuleLoader__.load({
         h('svg', {
           key: 'art',
           viewBox: '0 0 700 108',
-          role: 'presentation',
+          role: 'group',
+          'aria-label': '照片 / Photos',
           focusable: 'false',
           width: '100%',
           style: {
@@ -468,6 +515,9 @@ window.__ModuleLoader__.load({
               delay: DELAYS[index % DELAYS.length],
               duration: DURATIONS[index % DURATIONS.length],
               content,
+              label: item.kind === 'photo'
+                ? '照片 ' + (index + 1) + (item.name === '' ? '' : '：' + item.name) + ' / Photo ' + (index + 1)
+                : '内置插画 ' + (index + 1) + ' / Built-in illustration ' + (index + 1),
               onOpen: () => setPreview(
                 item.kind === 'photo'
                   ? { kind: 'photo', url: item.url, name: item.name }

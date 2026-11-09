@@ -12,11 +12,13 @@ test('manifest declares a web bundle with both halves', async () => {
   assert.equal(pkg.name, 'dsh-snap-line')
   assert.equal(pkg.type, 'module')
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
+  assert.equal(pkg.icon, 'icon.svg')
+  assert.equal(pkg.scripts.prepublishOnly, 'npm run check')
   assert.equal(pkg.dsh.client.platform, 'web')
   assert.equal(pkg.dsh.client.immediately, true)
   assert.deepEqual(pkg.dsh.client.inject, ['@deepseek-ai/dsh-client-ui-conversation'])
 
-  for (const file of ['index.js', 'lib', 'client.js', 'cordis.patch.yml', 'locale/*.json', 'icon.svg']) {
+  for (const file of ['index.js', 'lib', 'client.js', 'cordis.patch.yml', 'locale/*.json', 'icon.svg', 'docs/icon.png']) {
     assert.ok(pkg.files.includes(file), `files should include ${file}`)
   }
   assert.ok(pkg.files.every((entry) => !entry.includes('photos')), 'personal photos must stay out of the package')
@@ -68,12 +70,15 @@ test('clicking a photo opens a dismissible lightbox', async () => {
   assert.match(client, /className: 'sl-lightbox'/)
   assert.match(client, /role: 'dialog'/)
   assert.match(client, /'aria-modal': 'true'/)
-  assert.match(client, /aria-label': '关闭预览'/)
+  assert.match(client, /关闭预览/)
   assert.match(client, /addEventListener\('keydown'/)
   assert.match(client, /className: 'sl-lightbox-photo'/)
   assert.match(client, /className: 'sl-lightbox-polaroid'/)
   assert.match(client, /onClick: onOpen/)
   assert.match(client, /createPortal\(overlay, document\.body\)/)
+  assert.match(client, /role: 'button'/)
+  assert.match(client, /document\.body\.style\.overflow = 'hidden'/)
+  assert.match(client, /event\.key !== 'Tab'/)
 })
 
 test('locales expose non-empty display metadata', async () => {
@@ -115,6 +120,25 @@ test('documentation ships a Chinese primary README and an English one', async ()
   assert.match(en, /README\.md/)
   const png = await readFile(join(root, 'docs/images/preview.png'))
   assert.equal(png.subarray(1, 4).toString('latin1'), 'PNG')
+})
+
+test('market screenshots are declared and shipped', async () => {
+  const list = JSON.parse(await read('screenshots.json'))
+  assert.ok(Array.isArray(list))
+  assert.ok(list.length >= 1 && list.length <= 8)
+  for (const relative of list) {
+    assert.match(relative, /^docs\/images\/[^/]+\.(png|jpe?g|webp)$/)
+    const bytes = await readFile(join(root, relative))
+    assert.equal(bytes.subarray(1, 4).toString('latin1'), 'PNG', `${relative} should be a PNG`)
+  }
+  const zh = await read('README.md')
+  const en = await read('README.en.md')
+  for (const name of ['hero.png', 'lightbox.png']) {
+    assert.match(zh, new RegExp(`docs/images/${name}`))
+    assert.match(en, new RegExp(`docs/images/${name}`))
+  }
+  const icon = await readFile(join(root, 'docs/icon.png'))
+  assert.equal(icon.subarray(1, 4).toString('latin1'), 'PNG')
 })
 
 test('GitHub Actions runs the same check as a local build', async () => {

@@ -1,6 +1,7 @@
 {
   "name": "dsh-snap-line",
-  "version": "1.3.0",
+  "version": "1.3.1",
+  "icon": "icon.svg",
   "description": "Hangs a clothesline of polaroid photos under the message composer in DeepSeek Harness.",
   "type": "module",
   "license": "MIT",
@@ -40,11 +41,13 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "docs/images"
+    "docs/images",
+    "docs/icon.png"
   ],
   "scripts": {
     "check": "node --check index.js && node --check client.js && node --check lib/photos.js && node --test",
-    "test": "node --test"
+    "test": "node --test",
+    "prepublishOnly": "npm run check"
   },
   "dsh": {
     "manifestVersion": 1,

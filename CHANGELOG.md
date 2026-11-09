@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-09
+
+### Added
+
+- Storefront assets for the plugin market: `docs/images/hero.png`,
+  `docs/images/lightbox.png` and a `screenshots.json` beside `package.json`,
+  plus `docs/icon.png` as the market tile.
+- Photos are keyboard-operable: each frame is a focusable button, Enter or
+  Space opens the lightbox, Tab stays on the close button while it is open,
+  focus returns to the photo that opened it, and the page behind does not
+  scroll.
+- The clothesline, photos, lightbox and close button carry bilingual
+  Chinese/English accessible names.
+- `prepublishOnly` runs the full check suite before an npm publish.
+
+### Changed
+
+- Photo responses also send `Content-Length`, alongside the existing
+  `X-Content-Type-Options` header.
+- README leads with the npm install, documents creating the missing `photos/`
+  folder for package installs, and adds the new screenshots, keyboard notes
+  and upgrade instructions.
+- Published to npm as `dsh-snap-line@1.3.1`.
+
 ## [1.3.0] - 2026-11-09
 
 ### Added

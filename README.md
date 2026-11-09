@@ -17,6 +17,7 @@ SnapLine 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的界面插件�
 ## 目录
 
 - [特性](#特性)
+- [截图](#截图)
 - [安装](#安装)
 - [使用自己的照片](#使用自己的照片)
 - [工作原理](#工作原理)
@@ -33,18 +34,39 @@ SnapLine 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的界面插件�
 - **自带五张手绘插画**：`photos/` 为空时使用内置插画，不会出现空荡荡的绳子；
 - **换成自己的照片**：支持 `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`，按文件名自然排序，增删后 5 秒内自动刷新；
 - **排版自适应**：最多显示 6 张，超过时均匀抽样；照片越多排得越密，每张有自己的倾斜角度与摆动节奏；
-- **交互克制**：悬停时轻轻晃一下再回正，点击打开灯箱预览；只用 CSS `:hover`、`transform` 与 `react-dom` portal，没有 JS 监听、没有多余重渲染；
+- **交互克制**：悬停只靠 CSS `:hover` 与 `transform` 让照片轻轻晃一下再回正，点击打开灯箱预览，没有鼠标监听、没有多余重渲染；
+- **键盘友好**：照片可以用 Tab 聚焦，Enter / 空格打开灯箱；灯箱打开后 Tab 被约束在关闭按钮上，Esc、点击背景或关闭按钮都能退出，关闭后焦点回到打开它的照片；
+- **读屏器可读**：晾衣绳、每张照片、灯箱与关闭按钮都有中英双语的无障碍名称；
 - **尊重系统偏好**：`prefers-reduced-motion` 开启时不做摆动动画；
 - **零运行时依赖**：纯 ESM、无构建步骤，`react` / `react-dom` 复用 Harness 内置模块；
 - **照片不出本机**：Host 半通过 Harness web server 的同源路由提供图片，插件不发起任何外部请求。
 
+## 截图
+
+| 新会话首页 | 灯箱预览 |
+| --- | --- |
+| ![新会话首页：晾衣绳会自动放大](docs/images/hero.png) | ![灯箱预览：点击照片放大](docs/images/lightbox.png) |
+
 ## 安装
 
-SnapLine 是 Harness 的 bundle 插件，安装由 Harness 里的 Agent 通过 `plugin_manager` 完成。
+SnapLine 是 Harness 的 bundle 插件，可以走 npm、GitHub 或本地目录；安装由 Harness 里的 Agent 通过 `plugin_manager` 完成。
 
-### 方式一：交给 Harness Agent 安装（推荐）
+### 方式一：npm（推荐）
 
-把仓库地址发给 Harness Agent，并让它用 `plugin_manager` 的 `install_bundle` 安装：
+已发布到 npm：[`dsh-snap-line`](https://www.npmjs.com/package/dsh-snap-line)。
+
+- 让 Harness Agent 用 `plugin_manager` 的 `install_bundle` 安装 `dsh-snap-line`；
+- 或在终端运行：
+
+```bash
+dsh plugin --profile <profile> add dsh-snap-line
+```
+
+DSH 会从 npm 装好，并按 `dsh.bundle.patch` 组合 Host 半、按 `dsh.client` 加载 Client 半。收录到社区插件市场（awesome-dsh-plugin）后，也可以直接在 Harness 的插件市场里搜索安装。
+
+### 方式二：从 GitHub 安装
+
+把仓库地址发给 Harness Agent，并让它用 `install_bundle` 安装：
 
 ```text
 https://github.com/LMhuo/dsh-snap-line.git
@@ -54,21 +76,13 @@ https://github.com/LMhuo/dsh-snap-line.git
 
 安装成功后，插件会出现在 Harness 的插件列表（`~/.dsh/profiles/<profile>/package.json` 的 bundle 列表）里，并自动在输入框下方生效。
 
-### 方式二：本地克隆后安装（开发 / 调试推荐）
+### 方式三：本地克隆后安装（开发 / 调试推荐）
 
 ```bash
 git clone https://github.com/LMhuo/dsh-snap-line.git
 ```
 
 然后让 Harness Agent 用 `plugin_manager` 的 `install_bundle` 安装这个目录的**绝对路径**。`install_bundle` 会在当前 profile 的 `package.json` 中写入 `link:` 依赖并加入 bundle 列表，无需手动改 profile 文件。
-
-### 方式三：npm
-
-已发布到 npm：[`dsh-snap-line`](https://www.npmjs.com/package/dsh-snap-line)。让 Harness Agent 用 `plugin_manager` 的 `install_bundle` 安装 `dsh-snap-line` 即可，DSH 会从 npm 装好并自动加载 Host 半与 Client 半；也可以直接在终端运行：
-
-```bash
-dsh plugin --profile <profile> add dsh-snap-line
-```
 
 ### 停用与卸载
 
@@ -82,7 +96,9 @@ dsh plugin --profile <profile> add dsh-snap-line
 | 安装方式 | 照片目录 |
 | --- | --- |
 | 本地目录 / `link:` 安装 | 本仓库的 `photos/` |
-| GitHub / npm 安装 | `~/.dsh/profiles/<profile>/node_modules/dsh-snap-line/photos/` |
+| npm / GitHub 安装 | `~/.dsh/profiles/<profile>/node_modules/dsh-snap-line/photos/` |
+
+> npm 与 GitHub 安装的包默认不带 `photos/` 目录（私人照片不会被打进包），需要自己新建这个文件夹。
 
 把图片放进去即可：
 
@@ -103,6 +119,7 @@ photos/<name> ── GET /dsh-snap-line/photos/<name> ────────�
 
 - **Host 半**（`index.js`）：用 `webServer.register({ kind: 'prefix', path: '/dsh-snap-line' })` 提供照片清单与图片。`lib/photos.js` 是纯 Node 实现，拒绝目录穿越、隐藏文件名和未知媒体类型，可独立测试；
 - **Client 半**（`client.js`）：注册到 `conversation.composer.dock` 插槽（`order: 2`），每 5 秒轮询一次清单，按清单渲染照片或内置插画；
+- **灯箱**：点击照片（或 Tab 聚焦后按 Enter / 空格）打开；Esc、点击背景或关闭按钮退出，关闭后焦点回到打开它的照片，灯箱打开期间背景不滚动。
 - **新会话首页**：Host 只在有 Session 时渲染 `conversation.composer.dock`，空白 Hero 里只有一个空的 `[data-composer-dock]` 容器。Client 半额外向 `shell.overlay` 注册 `HeroClothesline`，每 250ms 检查页面里是否存在 `[data-content-phase="hero"] [data-composer-dock]`，若有则通过 `react-dom` 的 `createPortal` 把同一条晾衣绳画进该容器，并按量到的输入框宽度放大到 2 倍（600px 封顶）。进入正常会话、dock 版出现后自动让位，不会重复显示；拿不到 `react-dom` 或 `shell.overlay` 时静默跳过，不影响 dock 渲染；
 - dock 插槽本身是 fit-content 的 flex 行，SVG 的 `width: 100%` 会退回固有 300px，所以会话页晾衣绳一直是 300px 左右；Hero 版因此使用显式像素宽度，而不是改 `max-width`。
 
@@ -115,7 +132,7 @@ npm run check  # 语法检查 + 全部测试
 
 没有构建步骤，也没有运行时依赖。修改 `client.js` 会通过 HMR 自动刷新浏览器半；修改 `index.js` 后需要在插件设置里停用再启用一次。
 
-本地调试时推荐用上面的「方式二」以 `link:` 方式安装本仓库，这样改代码即时生效。
+本地调试时推荐用上面的「方式三」以 `link:` 方式安装本仓库，这样改代码即时生效。
 
 ### 目录结构
 
@@ -126,9 +143,10 @@ dsh-snap-line/
 ├── client.js           # Client 半：晾衣绳 SVG、插槽注册、灯箱
 ├── cordis.patch.yml    # bundle 插入的 Host 插件行
 ├── locale/             # 插件管理器中显示的中英文标题与描述
-├── icon.svg            # 插件图标
+├── icon.svg            # 插件列表里显示的矢量图标
+├── screenshots.json    # 插件市场卡片用的截图清单（指向 docs/images）
 ├── photos/             # 你自己的照片（默认不提交）
-├── docs/images/        # README 预览图等静态资源
+├── docs/               # README 预览图、市场截图与 PNG 图标
 ├── test/               # node:test 测试
 └── .github/workflows/  # GitHub Actions CI
 ```
@@ -161,7 +179,10 @@ dsh-snap-line/
 目前使用固定的暖色纸张配色，不随 Harness 主题切换；欢迎提交 PR。
 
 **怎么升级到新版本？**
-Git 方式安装没有版本列表：让 Agent 重新用 `install_bundle` 安装最新提交，或先 `remove_bundle` 再安装。每个版本的变更见 [CHANGELOG.md](CHANGELOG.md)。
+npm 安装：在插件市场里检查更新，或让 Agent 重新用 `install_bundle` 安装；Git 安装：让 Agent 重新安装最新提交，或先 `remove_bundle` 再安装。每个版本的变更见 [CHANGELOG.md](CHANGELOG.md)。
+
+**可以用键盘操作吗？**
+可以。照片可以用 Tab 聚焦，Enter / 空格打开灯箱；灯箱打开后 Tab 被约束在关闭按钮上，Esc 关闭，关闭后焦点回到照片。
 
 **可以商用吗？**
 可以，MIT 协议。
