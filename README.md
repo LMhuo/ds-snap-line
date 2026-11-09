@@ -49,7 +49,7 @@ SnapLine 是 Harness 的 bundle 插件，安装由 Harness 里的 Agent 通过 `
 https://github.com/LMhuo/dsh-snap-line.git
 ```
 
-也支持 `github:Lhuo/dsh-snap-line` 简写。DSH 会先用 pnpm 把它装进当前 profile，再按 `dsh.bundle.patch` 组合 Host 半、按 `dsh.client` 加载 Client 半。
+也支持 `github:LMhuo/dsh-snap-line` 简写。DSH 会先用 pnpm 把它装进当前 profile，再按 `dsh.bundle.patch` 组合 Host 半、按 `dsh.client` 加载 Client 半。
 
 安装成功后，插件会出现在 Harness 的插件列表（`~/.dsh/profiles/<profile>/package.json` 的 bundle 列表）里，并自动在输入框下方生效。
 

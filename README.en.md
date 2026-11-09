@@ -49,7 +49,7 @@ Send the repository URL to the Harness agent and ask it to install the bundle wi
 https://github.com/LMhuo/dsh-snap-line.git
 ```
 
-The `github:Lhuo/dsh-snap-line` shorthand works too. DSH installs it into the current profile with pnpm, then composes the Host half from `dsh.bundle.patch` and loads the Client half from `dsh.client`.
+The `github:LMhuo/dsh-snap-line` shorthand works too. DSH installs it into the current profile with pnpm, then composes the Host half from `dsh.bundle.patch` and loads the Client half from `dsh.client`.
 
 When it finishes, the plugin appears in Harness's plugin list (the bundle list in `~/.dsh/profiles/<profile>/package.json`) and starts rendering under the composer.
 
