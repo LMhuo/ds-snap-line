@@ -7,6 +7,7 @@
 [![CI](https://github.com/LMhuo/dsh-snap-line/actions/workflows/ci.yml/badge.svg)](https://github.com/LMhuo/dsh-snap-line/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](package.json)
+[![npm](https://img.shields.io/npm/v/dsh-snap-line?logo=npm)](https://www.npmjs.com/package/dsh-snap-line)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-4d6bfe)](https://github.com/deepseek-ai)
 
 SnapLine 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的界面插件（bundle）。它在聊天输入框下方画一条微微下垂的晾衣绳，夹上一排拍立得照片，照片随风轻轻摆动。默认是五张手绘小画；把照片放进 `photos/` 文件夹，就会换成你自己的照片，几秒内自动刷新，无需重启。
@@ -61,9 +62,13 @@ git clone https://github.com/LMhuo/dsh-snap-line.git
 
 然后让 Harness Agent 用 `plugin_manager` 的 `install_bundle` 安装这个目录的**绝对路径**。`install_bundle` 会在当前 profile 的 `package.json` 中写入 `link:` 依赖并加入 bundle 列表，无需手动改 profile 文件。
 
-### 方式三：npm（尚未发布）
+### 方式三：npm
 
-包名计划使用 `dsh-snap-line`（npm registry 上尚未发布，也还没有占位）。发布后可直接用 `install_bundle` 安装 `dsh-snap-line`；在那之前请使用前两种方式。
+已发布到 npm：[`dsh-snap-line`](https://www.npmjs.com/package/dsh-snap-line)。让 Harness Agent 用 `plugin_manager` 的 `install_bundle` 安装 `dsh-snap-line` 即可，DSH 会从 npm 装好并自动加载 Host 半与 Client 半；也可以直接在终端运行：
+
+```bash
+dsh plugin --profile <profile> add dsh-snap-line
+```
 
 ### 停用与卸载
 

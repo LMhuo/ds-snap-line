@@ -7,6 +7,7 @@
 [![CI](https://github.com/LMhuo/dsh-snap-line/actions/workflows/ci.yml/badge.svg)](https://github.com/LMhuo/dsh-snap-line/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](package.json)
+[![npm](https://img.shields.io/npm/v/dsh-snap-line?logo=npm)](https://www.npmjs.com/package/dsh-snap-line)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-4d6bfe)](https://github.com/deepseek-ai)
 
 SnapLine is a UI bundle for [DeepSeek Harness](https://github.com/deepseek-ai). It draws a gently sagging clothesline just under the chat composer, hung with a row of polaroid photos that sway in the breeze. Five hand-drawn illustrations ship by default; drop your own images into `photos/` and they replace the illustrations within seconds, no restart needed.
@@ -61,9 +62,13 @@ git clone https://github.com/LMhuo/dsh-snap-line.git
 
 Then ask the Harness agent to install that directory's **absolute path** with `install_bundle`. It writes a `link:` dependency into the current profile's `package.json` and adds it to the bundle list — no manual profile editing.
 
-### Option 3: npm (not published yet)
+### Option 3: npm
 
-The planned package name is `dsh-snap-line` — it is not reserved or published on npm yet. Once published, `install_bundle` can take that name; until then use option 1 or 2.
+Published on npm as [`dsh-snap-line`](https://www.npmjs.com/package/dsh-snap-line). Ask the Harness agent to install `dsh-snap-line` with `plugin_manager`'s `install_bundle` — DSH installs it from npm and loads both the Host and Client halves automatically. Or from a terminal:
+
+```bash
+dsh plugin --profile <profile> add dsh-snap-line
+```
 
 ### Disable and remove
 

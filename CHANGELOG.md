@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.0] - 2026-11-09
 
+### Added
+
+- Published to npm as [`dsh-snap-line`](https://www.npmjs.com/package/dsh-snap-line):
+  `install_bundle` can install it by package name, and the plugin market can
+  map the published package back to this repository.
+
 ### Changed
 
 - Renamed the project to `dsh-snap-line`. The npm package name, the bundle
