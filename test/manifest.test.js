@@ -42,6 +42,14 @@ test('client half uses the package name as module id and photo route', async () 
   assert.doesNotMatch(client, /photo-clothesline/)
 })
 
+test('client renders only on-rope photos and opens originals', async () => {
+  const client = await read('client.js')
+  assert.doesNotMatch(client, /samplePhotos/)
+  assert.match(client, /entry\.onRope === true/)
+  assert.match(client, /userPhotoImage\(item\.displayUrl\)/)
+  assert.match(client, /url: item\.originalUrl/)
+})
+
 test('new-session hero hangs the clothesline through the shell overlay', async () => {
   const client = await read('client.js')
   assert.match(client, /name: 'shell\.overlay'/)
