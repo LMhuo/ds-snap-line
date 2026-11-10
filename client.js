@@ -386,6 +386,18 @@ window.__ModuleLoader__.load({
         onRope: '在绳上',
         offRope: '未上绳',
         added: '已添加 {count} 张照片。',
+        delete: '删除',
+        deletePhoto: '删除照片：{name}',
+        deletePrompt: '确定删除？',
+        deleteConfirm: '删除确认：{name}',
+        confirmDelete: '确认删除',
+        confirmDeletePhoto: '确认删除照片：{name}',
+        cancelDelete: '取消',
+        cancelDeletePhoto: '取消删除照片：{name}',
+        deleting: '正在删除…',
+        deleted: '已删除 {name}。',
+        errorDeleteMissing: '{name}：照片已不存在，未删除。',
+        errorDeleteFailed: '{name}：删除失败，请稍后重试。',
         errorInvalidName: '{name}：文件名不能包含路径分隔符、以点开头或过长，未添加。',
         errorUnsupported: '{name}：不支持的图片格式，未添加。',
         errorHeic: '{name}：暂不支持 HEIC，请先转换为 JPG 或 PNG。',
@@ -408,6 +420,18 @@ window.__ModuleLoader__.load({
         onRope: 'On the rope',
         offRope: 'Off the rope',
         added: 'Added {count} photos.',
+        delete: 'Delete',
+        deletePhoto: 'Delete photo: {name}',
+        deletePrompt: 'Delete this photo?',
+        deleteConfirm: 'Delete confirmation: {name}',
+        confirmDelete: 'Confirm delete',
+        confirmDeletePhoto: 'Confirm deleting photo: {name}',
+        cancelDelete: 'Cancel',
+        cancelDeletePhoto: 'Cancel deleting photo: {name}',
+        deleting: 'Deleting…',
+        deleted: 'Deleted {name}.',
+        errorDeleteMissing: '{name}: the photo is already gone; nothing was deleted.',
+        errorDeleteFailed: '{name}: could not delete the photo; try again later.',
         errorInvalidName: '{name}: the file name cannot contain path separators, start with a dot, or be too long; not added.',
         errorUnsupported: '{name}: unsupported image type; not added.',
         errorHeic: '{name}: HEIC is not supported yet; convert it to JPG or PNG first.',
@@ -526,6 +550,28 @@ window.__ModuleLoader__.load({
       }
       .sl-manager-badge-off {
         opacity: 0.6;
+      }
+      .sl-manager-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-top: 2px;
+      }
+      .sl-manager-confirm-text {
+        font-size: 12px;
+        opacity: 0.85;
+      }
+      .sl-manager-delete {
+        color: #c0392b;
+        border-color: rgba(192, 57, 43, 0.45);
+      }
+      .sl-manager-delete:hover:not(:disabled) {
+        background: rgba(192, 57, 43, 0.12);
+      }
+      .sl-manager-delete:focus-visible {
+        outline: 2px solid rgba(192, 57, 43, 0.8);
+        outline-offset: 2px;
       }
       .sl-manager-errors {
         margin: 0;
@@ -705,10 +751,15 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState('');
       const [busy, setBusy] = React.useState(false);
       const [dragging, setDragging] = React.useState(false);
+      const [confirming, setConfirming] = React.useState('');
+      const [deleting, setDeleting] = React.useState('');
       const inputRef = React.useRef(null);
       /* Generated at most once per photo per manager open; a later open retries. */
       const attemptedDisplays = React.useRef(new Set());
       const busyDisplays = React.useRef(new Set());
+      const deleteButtonRefs = React.useRef({});
+      const confirmButtonRef = React.useRef(null);
+      const restoreFocusTo = React.useRef('');
 
       /*
        * Backfill display copies for photos that predate the photo manager or
@@ -751,6 +802,19 @@ window.__ModuleLoader__.load({
         };
       }, [photos]);
 
+      /* Move focus into the confirm step, and back to the delete control when it closes. */
+      React.useEffect(() => {
+        if (confirming !== '') {
+          if (confirmButtonRef.current !== null) confirmButtonRef.current.focus();
+          return;
+        }
+        const name = restoreFocusTo.current;
+        if (name === '') return;
+        restoreFocusTo.current = '';
+        const button = deleteButtonRefs.current[name];
+        if (button !== undefined && button !== null) button.focus();
+      }, [confirming]);
+
       const addFiles = async (fileList) => {
         const files = Array.from(fileList || []);
         if (files.length === 0) return;
@@ -782,6 +846,44 @@ window.__ModuleLoader__.load({
         }
       };
 
+      const removePhoto = async (name) => {
+        setDeleting(name);
+        setErrors([]);
+        setNotice('');
+        let failed = false;
+        try {
+          const response = await fetch(MANAGE_ENDPOINT + '?action=delete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name }),
+          });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            failed = true;
+            const code = payload !== null && typeof payload.error === 'string' ? payload.error : '';
+            const key = code === 'not-found'
+              ? 'errorDeleteMissing'
+              : code === 'forbidden' ? 'errorForbidden' : 'errorDeleteFailed';
+            setErrors([t(key, { name })]);
+            return;
+          }
+          setNotice(t('deleted', { name }));
+          window.dispatchEvent(new Event(PHOTOS_CHANGED_EVENT));
+        } catch {
+          failed = true;
+          setErrors([t('errorDeleteFailed', { name })]);
+        } finally {
+          setDeleting('');
+          setConfirming('');
+          if (failed) restoreFocusTo.current = name;
+        }
+      };
+
+      const cancelDelete = (name) => {
+        restoreFocusTo.current = name;
+        setConfirming('');
+      };
+
       const onDrop = (event) => {
         event.preventDefault();
         setDragging(false);
@@ -795,6 +897,7 @@ window.__ModuleLoader__.load({
 
       const total = photos === null ? 0 : photos.length;
       const onRope = photos === null ? 0 : photos.filter((photo) => photo.onRope).length;
+      const locked = busy || deleting !== '';
       return h('section', { className: 'sl-manager', 'aria-label': t('title') },
         h('style', { key: 'css' }, MANAGER_CSS),
         h('div', { className: 'sl-manager-header' },
@@ -814,7 +917,7 @@ window.__ModuleLoader__.load({
           h('button', {
             type: 'button',
             className: 'sl-manager-button',
-            disabled: busy,
+            disabled: locked,
             'aria-busy': busy ? 'true' : 'false',
             onClick: () => {
               if (inputRef.current !== null) inputRef.current.click();
@@ -827,6 +930,7 @@ window.__ModuleLoader__.load({
             accept: 'image/jpeg,image/png,image/webp,image/gif,image/avif',
             multiple: true,
             tabIndex: -1,
+            disabled: locked,
             'aria-hidden': 'true',
             onChange: (event) => {
               const files = event.target.files;
@@ -843,24 +947,74 @@ window.__ModuleLoader__.load({
           : photos.length === 0
             ? h('p', { className: 'sl-manager-hint' }, t('empty'))
             : h('ul', { className: 'sl-manager-list', 'aria-label': t('photoList') },
-                photos.map((photo, index) => h('li', {
-                  key: photo.name,
-                  className: 'sl-manager-item',
-                  'aria-label': t('photoItem', { position: index + 1, name: photo.name }),
-                },
-                  h('img', {
-                    className: 'sl-manager-thumb',
-                    src: photo.displayUrl,
-                    alt: '',
-                    draggable: 'false',
-                  }),
-                  h('span', { className: 'sl-manager-name' }, photo.name),
-                  h('span', {
-                    className: photo.onRope
-                      ? 'sl-manager-badge'
-                      : 'sl-manager-badge sl-manager-badge-off',
-                  }, photo.onRope ? t('onRope') : t('offRope')),
-                ))),
+                photos.map((photo, index) => {
+                  const isDeleting = deleting === photo.name;
+                  return h('li', {
+                    key: photo.name,
+                    className: 'sl-manager-item',
+                    'aria-label': t('photoItem', { position: index + 1, name: photo.name }),
+                  },
+                    h('img', {
+                      className: 'sl-manager-thumb',
+                      src: photo.displayUrl,
+                      alt: '',
+                      draggable: 'false',
+                    }),
+                    h('span', { className: 'sl-manager-name' }, photo.name),
+                    h('span', {
+                      className: photo.onRope
+                        ? 'sl-manager-badge'
+                        : 'sl-manager-badge sl-manager-badge-off',
+                    }, photo.onRope ? t('onRope') : t('offRope')),
+                    confirming === photo.name
+                      ? h('div', {
+                          className: 'sl-manager-actions',
+                          role: 'group',
+                          'aria-label': t('deleteConfirm', { name: photo.name }),
+                          onKeyDown: (event) => {
+                            if (event.key !== 'Escape') return;
+                            event.preventDefault();
+                            cancelDelete(photo.name);
+                          },
+                        },
+                          h('span', { className: 'sl-manager-confirm-text' }, t('deletePrompt')),
+                          h('button', {
+                            ref: confirmButtonRef,
+                            type: 'button',
+                            className: 'sl-manager-button sl-manager-delete',
+                            'aria-label': t('confirmDeletePhoto', { name: photo.name }),
+                            disabled: isDeleting,
+                            'aria-busy': isDeleting ? 'true' : 'false',
+                            onClick: () => {
+                              void removePhoto(photo.name);
+                            },
+                          }, isDeleting ? t('deleting') : t('confirmDelete')),
+                          h('button', {
+                            type: 'button',
+                            className: 'sl-manager-button',
+                            'aria-label': t('cancelDeletePhoto', { name: photo.name }),
+                            disabled: isDeleting,
+                            onClick: () => cancelDelete(photo.name),
+                          }, t('cancelDelete')),
+                        )
+                      : h('div', { className: 'sl-manager-actions' },
+                          h('button', {
+                            ref: (element) => {
+                              deleteButtonRefs.current[photo.name] = element;
+                            },
+                            type: 'button',
+                            className: 'sl-manager-button sl-manager-delete',
+                            'aria-label': t('deletePhoto', { name: photo.name }),
+                            disabled: locked,
+                            onClick: () => {
+                              setErrors([]);
+                              setNotice('');
+                              setConfirming(photo.name);
+                            },
+                          }, t('delete')),
+                        ),
+                  );
+                })),
       );
     }
 
