@@ -416,6 +416,7 @@ function addRequest(name, body, options = {}) {
   const origin = options.origin === undefined ? ORIGIN : options.origin
   if (origin !== null) headers.origin = origin
   if (options.secFetchSite !== undefined) headers['sec-fetch-site'] = options.secFetchSite
+  if (options.cookie !== undefined) headers.cookie = options.cookie
   const url = `${ORIGIN}${MANAGE_PATH}?action=add&name=${encodeURIComponent(name)}`
   return new Request(url, {
     method: 'POST',
@@ -691,14 +692,17 @@ test('manage add refuses traversal, hidden, malformed and over-long names with 4
   assert.deepEqual(await readdir(dir), [])
 })
 
-test('manage add refuses cross-origin, cross-site and origin-less requests with 403', async (t) => {
+test('manage add refuses cross-origin and cross-site requests with 403', async (t) => {
   const dir = await makeWritableDir(t)
   const resource = manageResource(dir)
 
   const cases = [
     addRequest('a.png', PNG, { origin: 'http://evil.example' }),
-    addRequest('b.png', PNG, { origin: null }),
+    /* A sandboxed or opaque frame sends the literal string, not an absent header. */
+    addRequest('f.png', PNG, { origin: 'null' }),
     addRequest('c.png', PNG, { secFetchSite: 'cross-site' }),
+    /* A contradictory signal is refused even when no Origin accompanies it. */
+    addRequest('e.png', PNG, { origin: null, secFetchSite: 'cross-site' }),
   ]
   for (const request of cases) {
     const response = await resource(request)
@@ -712,6 +716,49 @@ test('manage add refuses cross-origin, cross-site and origin-less requests with 
   })
   const response = await unbound(addRequest('d.png', PNG))
   assert.equal(response.status, 403)
+})
+
+/*
+ * The Desktop application renders the page at `dsh-app://app` and forwards its
+ * requests to the Host through the shell's `forwardWebRequest`, which deletes
+ * `host`, `origin`, `cookie` and `sec-fetch-site` before the Host ever sees them.
+ * A photo-manager write from the plugin detail page therefore arrives with no
+ * Origin at all; refusing that answered every action with 403
+ * "请求被拒绝，请刷新页面后重试". This test sends exactly that forwarded shape:
+ * no Origin, no Sec-Fetch-Site, and the Host's own cookie put in place.
+ */
+test('manage accepts writes the Desktop shell forwards without an Origin header', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  await writeFile(join(dir, 'b.png'), PNG)
+  const resource = manageResource(dir)
+  const desktop = { origin: null }
+
+  const added = await resource(addRequest(
+    'c.png',
+    Buffer.concat([pngOfSize(2, 2), Buffer.from('desktop-add')]),
+    { ...desktop, cookie: 'dsh_web_session=forwarded-by-desktop' },
+  ))
+  assert.equal(added.status, 200)
+  assert.deepEqual(await added.json(), { ok: true, name: 'c.png' })
+
+  const displayed = await resource(displayRequest('a.png', JPEG, desktop))
+  assert.equal(displayed.status, 200)
+  assert.deepEqual(await displayed.json(), { ok: true, name: 'a.png' })
+
+  const ordered = await resource(orderRequest(['b.png', 'a.png'], desktop))
+  assert.equal(ordered.status, 200)
+  assert.deepEqual(await ordered.json(), { ok: true, names: ['b.png', 'a.png'] })
+
+  const deleted = await resource(deleteRequest('b.png', desktop))
+  assert.equal(deleted.status, 200)
+  assert.deepEqual(await deleted.json(), { ok: true, name: 'b.png' })
+
+  /* The display copy lives under `.display/` and the order in `.order.json`. */
+  assert.deepEqual(
+    (await readdir(dir)).filter((name) => !name.startsWith('.')).sort(),
+    ['a.png', 'c.png'],
+  )
 })
 
 test('manage add leaves no partial file when the write fails', async (t) => {
@@ -939,14 +986,13 @@ test('manage delete refuses malformed JSON and non-string names with 400', async
   assert.deepEqual(await readdir(dir), ['a.png'])
 })
 
-test('manage display refuses cross-origin, origin-less and cross-site writes with 403', async (t) => {
+test('manage display refuses cross-origin and cross-site writes with 403', async (t) => {
   const dir = await makeWritableDir(t)
   await writeFile(join(dir, 'a.png'), PNG)
   const resource = manageResource(dir)
 
   const cases = [
     displayRequest('a.png', JPEG, { origin: 'http://evil.example' }),
-    displayRequest('a.png', JPEG, { origin: null }),
     displayRequest('a.png', JPEG, { secFetchSite: 'cross-site' }),
   ]
   for (const request of cases) {
@@ -957,14 +1003,13 @@ test('manage display refuses cross-origin, origin-less and cross-site writes wit
   assert.deepEqual(await readdir(dir), ['a.png'])
 })
 
-test('manage delete refuses cross-origin, origin-less and cross-site writes with 403', async (t) => {
+test('manage delete refuses cross-origin and cross-site writes with 403', async (t) => {
   const dir = await makeWritableDir(t)
   await writeFile(join(dir, 'a.png'), PNG)
   const resource = manageResource(dir)
 
   const cases = [
     deleteRequest('a.png', { origin: 'http://evil.example' }),
-    deleteRequest('a.png', { origin: null }),
     deleteRequest('a.png', { secFetchSite: 'cross-site' }),
   ]
   for (const request of cases) {
@@ -1095,13 +1140,12 @@ test('manage order refuses malformed, mistyped and oversized bodies without writ
   assert.deepEqual((await readdir(dir)).sort(), ['a.png', 'b.png'])
 })
 
-test('manage order keeps the same-origin policy', async (t) => {
+test('manage order refuses cross-origin and cross-site writes with 403', async (t) => {
   const dir = await makeWritableDir(t)
   await writeFile(join(dir, 'a.png'), PNG)
   const resource = manageResource(dir)
   const requests = [
     orderRequest(['a.png'], { origin: 'http://evil.example' }),
-    orderRequest(['a.png'], { origin: null }),
     orderRequest(['a.png'], { secFetchSite: 'cross-site' }),
   ]
   for (const request of requests) {

@@ -32,7 +32,7 @@ SnapLine is a UI bundle for [DeepSeek Harness](https://github.com/deepseek-ai). 
 
 - **Two places, one artwork**: hangs in the conversation's `conversation.composer.dock` slot (tight under the composer, never covering controls) and on the blank New Session hero;
 - **Five built-in illustrations**: the line is never empty when the photo folder has no images;
-- **Manage your own photos in the plugin detail page**: multi-select add, delete, drag to reorder, and the first six photos hang on the rope; `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`;
+- **Manage your own photos in the plugin detail page**: multi-select or drag-and-drop to add, delete with confirmation, reorder by dragging or with ↑/↓ buttons, and the first six photos hang on the rope; the list marks On the rope / Off the rope and shows a count summary; `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`;
 - **Adaptive layout**: up to six photos; the more photos, the tighter they sit, each with its own tilt and sway rhythm;
 - **Original and display copy**: the clothesline and list thumbnails load a few-hundred-KB display copy, while the lightbox loads the original;
 - **Restrained interaction**: hovering only uses CSS `:hover` and `transform` to give a photo a small nudge that settles back; clicking opens a lightbox — no mouse listeners, no extra re-renders;
@@ -87,15 +87,16 @@ Then ask the Harness agent to install that directory's **absolute path** with `i
 
 ### Disable and remove
 
-- Toggle the plugin off in Harness's plugin settings; or
+- Turn it off with the switch on the **Plugins → Installed plugins → dsh-snap-line** detail page; or
 - Ask the agent to call `plugin_manager`'s `set_bundle` (disable / enable) or `remove_bundle` (remove).
 
 ## Use your own photos
 
-Photos are managed in the **installed plugin's detail page**: sidebar **Plugins → Installed plugins → dsh-snap-line**. The photo manager there adds (multi-select), deletes and reorders photos by dragging. Order decides what hangs: **the first six photos are on the rope**, the rest stay in the list.
+Photos are managed in the **installed plugin's detail page**: sidebar **Plugins → Installed plugins → dsh-snap-line** (the plugin's settings render on this page). The photo manager adds photos by multi-select or drag-and-drop, deletes them after a confirmation, and reorders them by dragging or with each photo's ↑/↓ buttons. The list marks On the rope / Off the rope and the header summarises "N photos · M on the rope". Order decides what hangs: **the first six photos are on the rope**, the rest stay in the list.
 
 - Photos live in `$DSH_HOME/dsh-snap-line/photos/` (default `~/.dsh/dsh-snap-line/photos/`), not inside the plugin package, so upgrading the plugin never loses them;
 - `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`; at most 25MB and 64 megapixels per photo; iPhone HEIC files must be exported to JPEG first;
+- Adding a photo whose name already exists never overwrites it — the Host stores it under a suffixed name (`photo.jpg` → `photo-2.jpg`); deleting a photo removes its original, display copy and order entry together;
 - The clothesline and list thumbnails load a **display copy** (1280px longest edge, JPEG, usually a few hundred KB); the lightbox loads the **original**;
 - The order lives in `.order.json` in the photo folder, display copies in `.display/` (safe to delete, they are rebuilt);
 - You can skip the UI: drop images straight into the photo folder and they show up within five seconds; a hand-placed photo without a display copy gets one when you next open the detail page;
@@ -117,7 +118,7 @@ photo manager (detail page) ── POST /dsh-snap-line/manage ──▶ Host hal
 Client half (clothesline / lightbox) ◀── GET /dsh-snap-line/photos.json, GET /dsh-snap-line/photos/<name>, GET /dsh-snap-line/display/<name> ── Host half
 ```
 
-- **Host half** (`index.js`): the `/dsh-snap-line` prefix route (`resource`, GET / HEAD only) serves the photo manifest and the images; a separate `handler` route at `/dsh-snap-line/manage` handles adding, deleting, ordering and display-copy writes. The write side checks same-origin (`Origin` / `Sec-Fetch-Site`) request policy itself, enforces the per-photo size cap and image magic bytes, and writes atomically via temp file + rename. `lib/photos.js` stays plain Node and unit-testable;
+- **Host half** (`index.js`): the `/dsh-snap-line` prefix route (`resource`, GET / HEAD only) serves the photo manifest and the images; a separate `handler` route at `/dsh-snap-line/manage` handles adding, deleting, ordering and display-copy writes. The write side checks same-origin (`Origin` / `Sec-Fetch-Site`) request policy itself: a mismatched `Origin`, `Origin: null`, or `Sec-Fetch-Site: cross-site` is refused with 403, while an absent `Origin` is trusted because the Desktop application strips both headers when it forwards; it also enforces the per-photo size cap and image magic bytes, and writes atomically via temp file + rename. `lib/photos.js` stays plain Node and unit-testable;
 - **Client half** (`client.js`): keeps registering `conversation.composer.dock` (`order: 2`) and the `shell.overlay` hero copy, polls the manifest every five seconds, and now also registers the photo manager on the plugin manager page's `plugins.bundle.config` slot (keyed by package name);
 - **Original and display copy**: adding a photo generates a display copy in the browser with canvas (1280px longest edge, JPEG quality ≈ 0.82) and uploads it, while the original is stored byte-for-byte; the clothesline and thumbnails use the display copy, the lightbox uses the original; GIF / AVIF display copies use the first frame and keep the original's animation;
 - **Order**: `.order.json` holds the filename array; the first six hang on the rope and unlisted photos follow in natural filename order. After a write the client dispatches a window event so the clothesline refreshes immediately, with the five-second poll as fallback;
@@ -132,11 +133,11 @@ npm test       # node --test: photo listing, file route, manifest consistency �
 npm run check  # syntax check + full test suite
 ```
 
-No build step and no runtime dependencies. Editing `client.js` hot-reloads the browser half via HMR; editing `index.js` needs the plugin entry to be disabled and re-enabled once.
+No build step and no runtime dependencies. Editing `client.js` hot-reloads the browser half via HMR; editing `index.js` needs the plugin to be disabled and re-enabled once on the Plugins page.
 
 For local debugging, install this repository as a `link:` bundle (option 3) so edits take effect immediately.
 
-The project glossary is [GLOSSARY.md](GLOSSARY.md); the decision behind the photo folder is [ADR 0001](docs/adr/0001-photos-live-in-dsh-home.md).
+The project glossary is [GLOSSARY.md](GLOSSARY.md); the decision behind the photo folder is [ADR 0001](docs/adr/0001-photos-live-in-dsh-home.md), and why the write route accepts a Desktop-forwarded request without `Origin` is [ADR 0002](docs/adr/0002-desktop-forwarded-writes.md).
 
 ### Repository layout
 
@@ -160,7 +161,7 @@ dsh-snap-line/
 
 | Item | Requirement |
 | --- | --- |
-| DeepSeek Harness | 0.2.x (web platform; developed against 0.2.2) |
+| DeepSeek Harness | 0.2.x (web platform: browser Web GUI and the Desktop application; developed against 0.2.2) |
 | Node.js | ≥ 20 (development and tests only; the runtime uses Harness's bundled Node) |
 | Plugin shape | bundle (`dsh` field in `package.json` + `cordis.patch.yml`) |
 
@@ -181,7 +182,7 @@ No. They stay in the local photo folder and are served by the local Harness web 
 No. The wrapper is `pointer-events: none`; only the photo frames opt back in for hover and the lightbox click.
 
 **Can I change the number or size of photos?**
-Order decides which six hang — drag them in the detail page. The rope count is the Host constant `MAX_ON_ROPE` (`lib/photos.js`); the hero width is the Client constant `HERO_SVG_WIDTH`; `TILTS` / `DELAYS` / `DURATIONS` tune the tilt and sway rhythm.
+Order decides which six hang — drag them, or use each photo's ↑/↓ buttons, in the detail page. The rope count is the Host constant `MAX_ON_ROPE` (`lib/photos.js`); the hero width is the Client constant `HERO_SVG_WIDTH`; `TILTS` / `DELAYS` / `DURATIONS` tune the tilt and sway rhythm.
 
 **Does it support dark theme?**
 Currently it uses a fixed warm paper palette and does not follow the Harness theme. PRs welcome.
@@ -189,8 +190,14 @@ Currently it uses a fixed warm paper palette and does not follow the Harness the
 **How do I upgrade?**
 npm installs: check for updates in the plugin market, or ask the agent to `install_bundle` again. Git installs: ask the agent to install the latest commit again, or `remove_bundle` first and reinstall. Every release is documented in [CHANGELOG.md](CHANGELOG.md).
 
+**Do duplicate names overwrite, and can a deleted photo be restored?**
+Duplicates never overwrite: the new file is stored under a suffixed name (`photo.jpg` → `photo-2.jpg`). Deleting needs confirmation and removes the original, display copy and order entry together; the photo folder has no trash, so a deleted photo is gone for good.
+
+**Can I manage photos in the Desktop application?**
+Yes. The browser Web GUI and the Desktop application render the same photo manager on the plugin detail page; adding, deleting, reordering and display-copy generation all happen on your machine.
+
 **Can I use it with a keyboard?**
-Yes. Photos are focusable with Tab and Enter / Space opens the lightbox; Tab stays on the close button while it is open, Escape closes it, and focus returns to the photo. 
+Yes. Photos are focusable with Tab and Enter / Space opens the lightbox; Tab stays on the close button while it is open, Escape closes it, and focus returns to the photo.
 
 **Is commercial use allowed?**
 Yes, under the MIT license.

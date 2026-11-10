@@ -38,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The package's `photos/` folder is no longer read. Photos left there when
   upgrading from 1.3.x are not migrated; re-add them from the detail page.
 
+### Fixed
+
+- Photo-manager writes in the **Desktop application** no longer answer
+  "请求被拒绝，请刷新页面后重试" (403). The Desktop shell serves the page from
+  its own `dsh-app://app` scheme and forwards its requests to the Host after
+  stripping `Origin` and `Sec-Fetch-Site`, and the write route refused an absent
+  `Origin`. Writes now refuse only contradictory signals — a mismatched
+  `Origin`, the literal `Origin: null`, or `Sec-Fetch-Site: cross-site` — so the
+  same-origin policy for the web GUI is unchanged while the Desktop can add,
+  delete, reorder and store display copies again.
+
 ## [1.3.1] - 2026-11-09
 
 ### Added

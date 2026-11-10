@@ -3,9 +3,10 @@
  *
  * Serves the user's photo folder (`$DSH_HOME/dsh-snap-line/photos`) to the
  * Client half, which hangs the images on a clothesline under the message
- * composer, and accepts same-origin photo-manager writes from the plugin's
- * detail page. Everything is served from this machine over the Harness web
- * server; no external requests.
+ * composer, and accepts photo-manager writes from the plugin's detail page:
+ * same-origin ones over the web GUI, and the Desktop application's forwarded
+ * requests, which arrive without an `Origin` header. Everything is served from
+ * this machine over the Harness web server; no external requests.
  */
 import { Readable } from 'node:stream'
 import { createManageResource, createPhotoResource, MANAGE_PATH, photoFolder, ROUTE } from './lib/photos.js'
