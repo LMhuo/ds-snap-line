@@ -662,17 +662,47 @@ window.__ModuleLoader__.load({
       gif: 'image/gif',
       avif: 'image/avif',
     };
-    const MANAGER_ERROR_KEYS = {
-      'invalid-name': 'errorInvalidName',
-      'unsupported-media-type': 'errorUnsupported',
-      heic: 'errorHeic',
-      'too-large': 'errorTooLarge',
-      'too-many-pixels': 'errorTooLarge',
-      'magic-mismatch': 'errorInvalidImage',
-      forbidden: 'errorForbidden',
-      'unknown-action': 'errorUnexpected',
-      'method-not-allowed': 'errorUnexpected',
+    /*
+     * One place mapping Host error codes to dictionary keys. Each operation
+     * falls back to its own generic message.
+     */
+    const ERROR_KEYS_BY_OPERATION = {
+      add: {
+        'invalid-name': 'errorInvalidName',
+        'unsupported-media-type': 'errorUnsupported',
+        heic: 'errorHeic',
+        'too-large': 'errorTooLarge',
+        'too-many-pixels': 'errorTooLarge',
+        'magic-mismatch': 'errorInvalidImage',
+        'invalid-image': 'errorInvalidImage',
+        forbidden: 'errorForbidden',
+        'unknown-action': 'errorUnexpected',
+        'method-not-allowed': 'errorUnexpected',
+        fallback: 'errorUnexpected',
+      },
+      order: {
+        forbidden: 'errorOrderForbidden',
+        'invalid-order': 'errorOrderInvalid',
+        'invalid-name': 'errorOrderInvalid',
+        'too-large': 'errorOrderInvalid',
+        'unsupported-media-type': 'errorOrderInvalid',
+        fallback: 'errorOrder',
+      },
+      delete: {
+        'not-found': 'errorDeleteMissing',
+        forbidden: 'errorForbidden',
+        fallback: 'errorDeleteFailed',
+      },
     };
+
+    function errorKey(operation, code) {
+      const keys = ERROR_KEYS_BY_OPERATION[operation];
+      if (typeof code === 'string' && code !== 'fallback'
+        && Object.prototype.hasOwnProperty.call(keys, code)) {
+        return keys[code];
+      }
+      return keys.fallback;
+    }
 
     function fileNameExtension(name) {
       const dot = name.lastIndexOf('.');
@@ -700,21 +730,13 @@ window.__ModuleLoader__.load({
         payload = await response.json().catch(() => null);
         if (!response.ok) {
           const code = payload !== null && typeof payload.error === 'string' ? payload.error : '';
-          return { error: t(MANAGER_ERROR_KEYS[code] || 'errorUnexpected', { name: file.name }) };
+          return { error: t(errorKey('add', code), { name: file.name }) };
         }
       } catch {
         return { error: t('errorUnexpected', { name: file.name }) };
       }
       return { name: payload !== null && typeof payload.name === 'string' ? payload.name : file.name };
     }
-
-    const ORDER_ERROR_KEYS = {
-      forbidden: 'errorOrderForbidden',
-      'invalid-order': 'errorOrderInvalid',
-      'invalid-name': 'errorOrderInvalid',
-      'too-large': 'errorOrderInvalid',
-      'unsupported-media-type': 'errorOrderInvalid',
-    };
 
     /** Write the full name array; the Host normalizes it and the manifest follows. */
     async function saveOrder(names, t) {
@@ -727,10 +749,10 @@ window.__ModuleLoader__.load({
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
           const code = payload !== null && typeof payload.error === 'string' ? payload.error : '';
-          return { error: t(ORDER_ERROR_KEYS[code] || 'errorOrder') };
+          return { error: t(errorKey('order', code)) };
         }
       } catch {
-        return { error: t('errorOrder') };
+        return { error: t(errorKey('order', '')) };
       }
       return { ok: true };
     }
@@ -855,6 +877,21 @@ window.__ModuleLoader__.load({
       const confirmButtonRef = React.useRef(null);
       const restoreFocusTo = React.useRef('');
 
+      /**
+       * Run one display-copy job per photo at a time. Returns undefined when the
+       * photo is already busy, so the caller can leave the original fallback in
+       * place and try again on a later open.
+       */
+      const runDisplayTask = async (name, task) => {
+        if (busyDisplays.current.has(name)) return undefined;
+        busyDisplays.current.add(name);
+        try {
+          return await task();
+        } finally {
+          busyDisplays.current.delete(name);
+        }
+      };
+
       /*
        * Backfill display copies for photos that predate the photo manager or
        * were dropped into the folder by hand. Skip photos that already have
@@ -874,9 +911,7 @@ window.__ModuleLoader__.load({
             /* Marked here, not up front, so a React StrictMode re-run still works. */
             if (attemptedDisplays.current.has(photo.name)) continue;
             attemptedDisplays.current.add(photo.name);
-            if (busyDisplays.current.has(photo.name)) continue;
-            busyDisplays.current.add(photo.name);
-            try {
+            const stored = await runDisplayTask(photo.name, async () => {
               let source = null;
               try {
                 const response = await fetch(photo.originalUrl);
@@ -884,10 +919,9 @@ window.__ModuleLoader__.load({
               } catch {
                 source = null;
               }
-              if (source !== null && await storeDisplayCopy(photo.name, source)) uploaded = true;
-            } finally {
-              busyDisplays.current.delete(photo.name);
-            }
+              return source !== null && await storeDisplayCopy(photo.name, source);
+            });
+            if (stored === true) uploaded = true;
           }
           if (!cancelled && uploaded) window.dispatchEvent(new Event(PHOTOS_CHANGED_EVENT));
         })();
@@ -926,12 +960,7 @@ window.__ModuleLoader__.load({
           }
           added += 1;
           /* The original is already listed if this best-effort copy fails. */
-          busyDisplays.current.add(result.name);
-          try {
-            await storeDisplayCopy(result.name, file);
-          } finally {
-            busyDisplays.current.delete(result.name);
-          }
+          await runDisplayTask(result.name, () => storeDisplayCopy(result.name, file));
         }
         setBusy(false);
         setErrors(failures);
@@ -957,17 +986,14 @@ window.__ModuleLoader__.load({
           if (!response.ok) {
             failed = true;
             const code = payload !== null && typeof payload.error === 'string' ? payload.error : '';
-            const key = code === 'not-found'
-              ? 'errorDeleteMissing'
-              : code === 'forbidden' ? 'errorForbidden' : 'errorDeleteFailed';
-            setErrors([t(key, { name })]);
+            setErrors([t(errorKey('delete', code), { name })]);
             return;
           }
           setNotice(t('deleted', { name }));
           window.dispatchEvent(new Event(PHOTOS_CHANGED_EVENT));
         } catch {
           failed = true;
-          setErrors([t('errorDeleteFailed', { name })]);
+          setErrors([t(errorKey('delete', ''), { name })]);
         } finally {
           setDeleting('');
           setConfirming('');
@@ -1123,11 +1149,9 @@ window.__ModuleLoader__.load({
                     onDrop: (event) => dropOnItem(event, index),
                     onDragEnd: endDrag,
                   },
-                    h('img', {
-                      className: 'sl-manager-thumb',
-                      src: photo.displayUrl,
-                      alt: '',
-                      draggable: 'false',
+                    h(PhotoThumb, {
+                      displayUrl: photo.displayUrl,
+                      originalUrl: photo.originalUrl,
                     }),
                     h('span', { className: 'sl-manager-name' }, photo.name),
                     h('span', {
@@ -1206,16 +1230,45 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function userPhotoImage(url) {
+    /** Display copy with a per-photo fallback to the original when decoding fails. */
+    function usePhotoSource(displayUrl, originalUrl) {
+      const [source, setSource] = React.useState(displayUrl);
+      React.useEffect(() => {
+        setSource(displayUrl);
+      }, [displayUrl]);
+      const onError = () => {
+        if (source !== originalUrl) setSource(originalUrl);
+      };
+      return [source, onError];
+    }
+
+    function PhotoThumb(props) {
+      const [source, onError] = usePhotoSource(props.displayUrl, props.originalUrl);
+      return h('img', {
+        className: 'sl-manager-thumb',
+        src: source,
+        alt: '',
+        draggable: 'false',
+        onError,
+      });
+    }
+
+    function PhotoImage(props) {
+      const [source, onError] = usePhotoSource(props.displayUrl, props.originalUrl);
+      return h('image', {
+        href: source,
+        x: -26,
+        y: 11,
+        width: 52,
+        height: 52,
+        preserveAspectRatio: 'xMidYMid slice',
+        onError,
+      });
+    }
+
+    function userPhotoImage(displayUrl, originalUrl) {
       return h('g', { clipPath: 'url(#slClip)' },
-        h('image', {
-          href: url,
-          x: -26,
-          y: 11,
-          width: 52,
-          height: 52,
-          preserveAspectRatio: 'xMidYMid slice',
-        }),
+        h(PhotoImage, { displayUrl, originalUrl }),
       );
     }
 
@@ -1383,7 +1436,7 @@ window.__ModuleLoader__.load({
           h('circle', { cx: 18, cy: 14, r: 2.6, fill: '#8a7a63' }),
           h('circle', { cx: 682, cy: 14, r: 2.6, fill: '#8a7a63' }),
           items.map((item, index) => {
-            const content = item.kind === 'photo' ? userPhotoImage(item.displayUrl) : item.scene();
+            const content = item.kind === 'photo' ? userPhotoImage(item.displayUrl, item.originalUrl) : item.scene();
             return h(Photo, {
               key: item.kind === 'photo' ? 'photo-' + item.name : 'illustration-' + index,
               x: xs[index],

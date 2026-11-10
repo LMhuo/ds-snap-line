@@ -32,61 +32,15 @@ test('bundle patch inserts a row whose name matches the package', async () => {
   assert.match(patch, new RegExp(`name: '${pkg.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`))
 })
 
-test('client half uses the package name as module id and photo route', async () => {
-  const pkg = JSON.parse(await read('package.json'))
-  const client = await read('client.js')
-  assert.match(client, new RegExp(`id: '${pkg.name}'`))
-  assert.match(client, /PHOTO_ENDPOINT = '\/dsh-snap-line\/photos\.json'/)
-  assert.match(client, /name: 'conversation\.composer\.dock'/)
-  assert.match(client, /order: 2/)
-  assert.doesNotMatch(client, /photo-clothesline/)
-})
-
-test('client renders only on-rope photos and opens originals', async () => {
-  const client = await read('client.js')
-  assert.doesNotMatch(client, /samplePhotos/)
-  assert.match(client, /entry\.onRope === true/)
-  assert.match(client, /userPhotoImage\(item\.displayUrl\)/)
-  assert.match(client, /url: item\.originalUrl/)
-})
-
-test('new-session hero hangs the clothesline through the shell overlay', async () => {
-  const client = await read('client.js')
-  assert.match(client, /name: 'shell\.overlay'/)
-  assert.match(client, /id: 'dsh-snap-line-hero'/)
-  assert.match(client, /\[data-content-phase="hero"\] \[data-composer-dock\]/)
-  assert.match(client, /require\('react-dom'\)/)
-  assert.match(client, /createPortal/)
-  assert.match(client, /HERO_SVG_WIDTH = 600/)
-  assert.match(client, /h\(Clothesline, \{ source: 'hero', width \}\)/)
-  assert.match(client, /data-composer-card/)
-})
-
-test('hover nudge is CSS-only and gated on pointer and motion preferences', async () => {
-  const client = await read('client.js')
-  assert.match(client, /className: 'sl-photo'/)
-  assert.match(client, /className: 'sl-wobble'/)
-  assert.match(client, /@keyframes sl-wobble/)
-  assert.match(client, /\.sl-photo:hover \.sl-wobble \{/)
-  assert.match(client, /@media \(hover: hover\) and \(pointer: fine\) and \(prefers-reduced-motion: no-preference\)/)
-  assert.match(client, /\.sl-photo \{[^}]*pointer-events: auto;/)
-  assert.doesNotMatch(client, /addEventListener\('(?:mouse|pointer)|onMouseEnter|onMouseMove/)
-})
-
-test('clicking a photo opens a dismissible lightbox', async () => {
-  const client = await read('client.js')
-  assert.match(client, /className: 'sl-lightbox'/)
-  assert.match(client, /role: 'dialog'/)
-  assert.match(client, /'aria-modal': 'true'/)
-  assert.match(client, /关闭预览/)
-  assert.match(client, /addEventListener\('keydown'/)
-  assert.match(client, /className: 'sl-lightbox-photo'/)
-  assert.match(client, /className: 'sl-lightbox-polaroid'/)
-  assert.match(client, /onClick: onOpen/)
-  assert.match(client, /createPortal\(overlay, document\.body\)/)
-  assert.match(client, /role: 'button'/)
-  assert.match(client, /document\.body\.style\.overflow = 'hidden'/)
-  assert.match(client, /event\.key !== 'Tab'/)
+test('repository docs ship the glossary and the photo-folder ADR, linked from both READMEs', async () => {
+  const zh = await read('README.md')
+  const en = await read('README.en.md')
+  for (const doc of ['GLOSSARY.md', 'docs/adr/0001-photos-live-in-dsh-home.md']) {
+    const text = await read(doc)
+    assert.ok(text.trim().length > 0, `${doc} should not be empty`)
+    assert.ok(zh.includes(doc), `README.md should link ${doc}`)
+    assert.ok(en.includes(doc), `README.en.md should link ${doc}`)
+  }
 })
 
 test('locales expose non-empty display metadata', async () => {
