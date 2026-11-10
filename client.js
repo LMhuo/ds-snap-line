@@ -274,7 +274,10 @@ window.__ModuleLoader__.load({
     const DELAYS = ['0s', '-1.8s', '-3.2s', '-0.7s', '-2.5s', '-4.1s'];
     const DURATIONS = ['7.6s', '6.8s', '8.2s', '7.1s', '6.5s', '7.8s'];
     const PHOTO_ENDPOINT = '/dsh-snap-line/photos.json';
+    const MANAGE_ENDPOINT = '/dsh-snap-line/manage';
+    const PHOTOS_CHANGED_EVENT = 'dsh-snap-line:photos-changed';
     const POLL_INTERVAL_MS = 5000;
+    const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
     /** Evenly spread photo centers along the rope, capped at the old five-photo spacing. */
     function photoPositions(count) {
@@ -284,18 +287,21 @@ window.__ModuleLoader__.load({
       return Array.from({ length: count }, (_, index) => Math.round((first + spacing * index) * 100) / 100);
     }
 
-    /** Poll the host's photo listing so dropped or removed images show up on their own. */
-    function usePhotoList() {
+    /**
+     * Poll the host's photo listing and refresh at once when the photo manager
+     * dispatches PHOTOS_CHANGED_EVENT after a write; the poll stays as fallback
+     * for photos dropped into the folder by hand.
+     */
+    function useManifest(onRopeOnly) {
       const [photos, setPhotos] = React.useState(null);
       React.useEffect(() => {
         let active = true;
-        let timer;
+        let timer = null;
+        let running = false;
+        let pending = false;
         let lastKey = '';
-        const poll = async () => {
-          if (document.visibilityState === 'hidden') {
-            if (active) timer = setTimeout(poll, POLL_INTERVAL_MS);
-            return;
-          }
+        const load = async () => {
+          if (document.visibilityState === 'hidden') return;
           try {
             const response = await fetch(PHOTO_ENDPOINT, { cache: 'no-store' });
             if (!response.ok) throw new Error('HTTP ' + response.status);
@@ -304,13 +310,14 @@ window.__ModuleLoader__.load({
             const next = Array.isArray(data.photos)
               ? data.photos
                   .filter((entry) => entry !== null && typeof entry === 'object'
-                    && entry.onRope === true
+                    && (onRopeOnly === false || entry.onRope === true)
                     && typeof entry.displayUrl === 'string'
                     && typeof entry.originalUrl === 'string')
                   .map((entry) => ({
                     name: typeof entry.name === 'string' ? entry.name : '',
                     displayUrl: entry.displayUrl,
                     originalUrl: entry.originalUrl,
+                    onRope: entry.onRope === true,
                   }))
               : [];
             const key = next.map((entry) => entry.displayUrl + '|' + entry.originalUrl).join('|');
@@ -320,17 +327,386 @@ window.__ModuleLoader__.load({
             }
           } catch {
             if (active) setPhotos((previous) => (previous === null ? [] : previous));
-          } finally {
-            if (active) timer = setTimeout(poll, POLL_INTERVAL_MS);
           }
         };
-        poll();
+        const run = async () => {
+          timer = null;
+          if (running) {
+            pending = true;
+            return;
+          }
+          running = true;
+          await load();
+          running = false;
+          if (!active) return;
+          if (pending) {
+            pending = false;
+            void run();
+          } else {
+            timer = setTimeout(run, POLL_INTERVAL_MS);
+          }
+        };
+        const refresh = () => {
+          if (!active) return;
+          clearTimeout(timer);
+          void run();
+        };
+        void run();
+        window.addEventListener(PHOTOS_CHANGED_EVENT, refresh);
         return () => {
           active = false;
           clearTimeout(timer);
+          window.removeEventListener(PHOTOS_CHANGED_EVENT, refresh);
         };
-      }, []);
+      }, [onRopeOnly]);
       return photos;
+    }
+
+    function usePhotoList() {
+      return useManifest(true);
+    }
+
+    /* --- Photo manager --------------------------------------------------- */
+
+    const MANAGER_NAMESPACE = 'snapLineManager';
+    const MANAGER_DICTIONARY = {
+      zh: {
+        title: '照片',
+        summary: '共 {total} 张，{onRope} 张在绳上',
+        loading: '正在读取照片…',
+        empty: '照片目录还是空的；添加照片后就会替换内置插画。',
+        add: '添加照片',
+        uploading: '正在添加…',
+        dropZone: '添加照片区域',
+        dropHint: '把照片拖到这里，或选择文件；支持 JPG、PNG、WebP、GIF、AVIF，单张不超过 25MB。',
+        photoList: '照片列表',
+        photoItem: '照片 {position}：{name}',
+        onRope: '在绳上',
+        offRope: '未上绳',
+        added: '已添加 {count} 张照片。',
+        errorInvalidName: '{name}：文件名不能包含路径分隔符、以点开头或过长，未添加。',
+        errorUnsupported: '{name}：不支持的图片格式，未添加。',
+        errorHeic: '{name}：暂不支持 HEIC，请先转换为 JPG 或 PNG。',
+        errorTooLarge: '{name}：超过单张 25MB 或 6400 万像素，未添加。',
+        errorInvalidImage: '{name}：文件内容与图片格式不符，未添加。',
+        errorForbidden: '{name}：请求被拒绝，请刷新页面后重试。',
+        errorUnexpected: '{name}：添加失败，请稍后重试。',
+      },
+      en: {
+        title: 'Photos',
+        summary: '{total} photos · {onRope} on the rope',
+        loading: 'Reading photos…',
+        empty: 'The photo folder is still empty; add photos to replace the built-in illustrations.',
+        add: 'Add photos',
+        uploading: 'Adding…',
+        dropZone: 'Add photos area',
+        dropHint: 'Drop photos here or choose files; JPG, PNG, WebP, GIF and AVIF, up to 25MB each.',
+        photoList: 'Photo list',
+        photoItem: 'Photo {position}: {name}',
+        onRope: 'On the rope',
+        offRope: 'Off the rope',
+        added: 'Added {count} photos.',
+        errorInvalidName: '{name}: the file name cannot contain path separators, start with a dot, or be too long; not added.',
+        errorUnsupported: '{name}: unsupported image type; not added.',
+        errorHeic: '{name}: HEIC is not supported yet; convert it to JPG or PNG first.',
+        errorTooLarge: '{name}: larger than 25MB or 64 megapixels; not added.',
+        errorInvalidImage: '{name}: the file contents do not match an image; not added.',
+        errorForbidden: '{name}: the request was refused; refresh the page and try again.',
+        errorUnexpected: '{name}: could not add the photo; try again later.',
+      },
+    };
+
+    const MANAGER_CSS = `
+      .sl-manager {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: inherit;
+      }
+      .sl-manager-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .sl-manager-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .sl-manager-summary {
+        opacity: 0.7;
+      }
+      .sl-manager-drop {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 12px 14px;
+        border: 1px dashed rgba(128, 128, 128, 0.55);
+        border-radius: 8px;
+        transition: background-color 120ms ease, border-color 120ms ease;
+      }
+      .sl-manager-drop[data-dragging="true"] {
+        border-color: rgba(128, 128, 128, 0.95);
+        background: rgba(128, 128, 128, 0.12);
+      }
+      .sl-manager-hint {
+        margin: 0;
+        opacity: 0.78;
+        flex: 1 1 220px;
+      }
+      .sl-manager-button {
+        padding: 6px 12px;
+        border: 1px solid rgba(128, 128, 128, 0.5);
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .sl-manager-button:hover:not(:disabled) {
+        background: rgba(128, 128, 128, 0.12);
+      }
+      .sl-manager-button:focus-visible {
+        outline: 2px solid rgba(128, 128, 128, 0.9);
+        outline-offset: 2px;
+      }
+      .sl-manager-button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .sl-manager-input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+      .sl-manager-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+        gap: 12px;
+      }
+      .sl-manager-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+      .sl-manager-thumb {
+        display: block;
+        width: 100%;
+        aspect-ratio: 4 / 3;
+        object-fit: cover;
+        border-radius: 6px;
+        background: rgba(128, 128, 128, 0.12);
+      }
+      .sl-manager-name {
+        overflow-wrap: anywhere;
+      }
+      .sl-manager-badge {
+        align-self: flex-start;
+        padding: 1px 6px;
+        border-radius: 999px;
+        font-size: 11px;
+        background: rgba(128, 128, 128, 0.18);
+      }
+      .sl-manager-badge-off {
+        opacity: 0.6;
+      }
+      .sl-manager-errors {
+        margin: 0;
+        padding-left: 18px;
+        color: #c0392b;
+      }
+      .sl-manager-notice {
+        margin: 0;
+        opacity: 0.8;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .sl-manager-drop {
+          transition: none;
+        }
+      }
+    `;
+
+    const UPLOAD_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif']);
+    const HEIC_EXTENSIONS = new Set(['heic', 'heif']);
+    const MEDIA_TYPES_BY_EXTENSION = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      avif: 'image/avif',
+    };
+    const MANAGER_ERROR_KEYS = {
+      'invalid-name': 'errorInvalidName',
+      'unsupported-media-type': 'errorUnsupported',
+      heic: 'errorHeic',
+      'too-large': 'errorTooLarge',
+      'too-many-pixels': 'errorTooLarge',
+      'magic-mismatch': 'errorInvalidImage',
+      forbidden: 'errorForbidden',
+      'unknown-action': 'errorUnexpected',
+      'method-not-allowed': 'errorUnexpected',
+    };
+
+    function fileNameExtension(name) {
+      const dot = name.lastIndexOf('.');
+      return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
+    }
+
+    async function uploadPhoto(file, t) {
+      const extension = fileNameExtension(file.name);
+      if (HEIC_EXTENSIONS.has(extension)) return { error: t('errorHeic', { name: file.name }) };
+      if (!UPLOAD_EXTENSIONS.has(extension)) return { error: t('errorUnsupported', { name: file.name }) };
+      if (file.size > MAX_UPLOAD_BYTES) return { error: t('errorTooLarge', { name: file.name }) };
+      const contentType = typeof file.type === 'string' && file.type.length > 0
+        ? file.type
+        : MEDIA_TYPES_BY_EXTENSION[extension];
+      let payload = null;
+      try {
+        const response = await fetch(
+          MANAGE_ENDPOINT + '?action=add&name=' + encodeURIComponent(file.name),
+          {
+            method: 'POST',
+            headers: { 'content-type': contentType },
+            body: file,
+          },
+        );
+        payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const code = payload !== null && typeof payload.error === 'string' ? payload.error : '';
+          return { error: t(MANAGER_ERROR_KEYS[code] || 'errorUnexpected', { name: file.name }) };
+        }
+      } catch {
+        return { error: t('errorUnexpected', { name: file.name }) };
+      }
+      return { name: payload !== null && typeof payload.name === 'string' ? payload.name : file.name };
+    }
+
+    function PhotoManager(props) {
+      const { t } = props;
+      const photos = useManifest(false);
+      const [errors, setErrors] = React.useState([]);
+      const [notice, setNotice] = React.useState('');
+      const [busy, setBusy] = React.useState(false);
+      const [dragging, setDragging] = React.useState(false);
+      const inputRef = React.useRef(null);
+
+      const addFiles = async (fileList) => {
+        const files = Array.from(fileList || []);
+        if (files.length === 0) return;
+        setBusy(true);
+        setErrors([]);
+        setNotice('');
+        const failures = [];
+        let added = 0;
+        for (const file of files) {
+          const result = await uploadPhoto(file, t);
+          if (result.error !== undefined) failures.push(result.error);
+          else added += 1;
+        }
+        setBusy(false);
+        setErrors(failures);
+        if (added > 0) {
+          setNotice(t('added', { count: added }));
+          window.dispatchEvent(new Event(PHOTOS_CHANGED_EVENT));
+        }
+      };
+
+      const onDrop = (event) => {
+        event.preventDefault();
+        setDragging(false);
+        void addFiles(event.dataTransfer === null ? null : event.dataTransfer.files);
+      };
+      const onDragOver = (event) => {
+        event.preventDefault();
+        if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'copy';
+        setDragging(true);
+      };
+
+      const total = photos === null ? 0 : photos.length;
+      const onRope = photos === null ? 0 : photos.filter((photo) => photo.onRope).length;
+      return h('section', { className: 'sl-manager', 'aria-label': t('title') },
+        h('style', { key: 'css' }, MANAGER_CSS),
+        h('div', { className: 'sl-manager-header' },
+          h('h3', { className: 'sl-manager-title' }, t('title')),
+          photos === null ? null : h('span', { className: 'sl-manager-summary' }, t('summary', { total, onRope })),
+        ),
+        h('div', {
+          className: 'sl-manager-drop',
+          'data-dragging': dragging ? 'true' : 'false',
+          role: 'group',
+          'aria-label': t('dropZone'),
+          onDragOver,
+          onDragLeave: () => setDragging(false),
+          onDrop,
+        },
+          h('span', { className: 'sl-manager-hint' }, t('dropHint')),
+          h('button', {
+            type: 'button',
+            className: 'sl-manager-button',
+            disabled: busy,
+            'aria-busy': busy ? 'true' : 'false',
+            onClick: () => {
+              if (inputRef.current !== null) inputRef.current.click();
+            },
+          }, busy ? t('uploading') : t('add')),
+          h('input', {
+            ref: inputRef,
+            type: 'file',
+            className: 'sl-manager-input',
+            accept: 'image/jpeg,image/png,image/webp,image/gif,image/avif',
+            multiple: true,
+            tabIndex: -1,
+            'aria-hidden': 'true',
+            onChange: (event) => {
+              const files = event.target.files;
+              event.target.value = '';
+              void addFiles(files);
+            },
+          }),
+        ),
+        errors.length === 0 ? null : h('ul', { className: 'sl-manager-errors', role: 'alert' },
+          errors.map((message, index) => h('li', { key: index }, message))),
+        notice === '' ? null : h('p', { className: 'sl-manager-notice', role: 'status', 'aria-live': 'polite' }, notice),
+        photos === null
+          ? h('p', { className: 'sl-manager-hint' }, t('loading'))
+          : photos.length === 0
+            ? h('p', { className: 'sl-manager-hint' }, t('empty'))
+            : h('ul', { className: 'sl-manager-list', 'aria-label': t('photoList') },
+                photos.map((photo, index) => h('li', {
+                  key: photo.name,
+                  className: 'sl-manager-item',
+                  'aria-label': t('photoItem', { position: index + 1, name: photo.name }),
+                },
+                  h('img', {
+                    className: 'sl-manager-thumb',
+                    src: photo.displayUrl,
+                    alt: '',
+                    draggable: 'false',
+                  }),
+                  h('span', { className: 'sl-manager-name' }, photo.name),
+                  h('span', {
+                    className: photo.onRope
+                      ? 'sl-manager-badge'
+                      : 'sl-manager-badge sl-manager-badge-off',
+                  }, photo.onRope ? t('onRope') : t('offRope')),
+                ))),
+      );
     }
 
     function userPhotoImage(url) {
@@ -607,8 +983,17 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots'],
+      inject: ['slots', 'locale'],
       apply(ctx) {
+        ctx.effect(
+          () => ctx.locale.register(MANAGER_NAMESPACE, MANAGER_DICTIONARY),
+          'dsh-snap-line: photo manager copy',
+        );
+        ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+          name: 'plugins.bundle.config',
+          key: 'dsh-snap-line',
+          locale: MANAGER_NAMESPACE,
+        }, PhotoManager));
         ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
           name: 'conversation.composer.dock',
           id: 'dsh-snap-line',
