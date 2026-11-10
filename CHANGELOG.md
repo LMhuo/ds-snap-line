@@ -5,7 +5,7 @@ All notable changes to SnapLine are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-11-10
 
 ### Added
 
@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The clothesline shows the first six photos in order; the previous even
   sampling is gone. README, README.en and `photos/README.md` describe the new
   location and workflow.
+- Published to npm as `dsh-snap-line@1.4.0`.
 
 ### Removed
 
