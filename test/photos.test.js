@@ -266,6 +266,18 @@ function addRequest(name, body, options = {}) {
   })
 }
 
+function deleteRequest(name, options = {}) {
+  const headers = { 'content-type': 'application/json' }
+  const origin = options.origin === undefined ? ORIGIN : options.origin
+  if (origin !== null) headers.origin = origin
+  if (options.secFetchSite !== undefined) headers['sec-fetch-site'] = options.secFetchSite
+  return new Request(`${ORIGIN}${MANAGE_PATH}?action=delete`, {
+    method: 'POST',
+    headers,
+    body: options.body === undefined ? JSON.stringify({ name }) : options.body,
+  })
+}
+
 /** A PNG signature plus an IHDR that declares the requested pixel size. */
 function pngOfSize(width, height) {
   const header = Buffer.alloc(24)
@@ -418,6 +430,135 @@ test('manage add leaves no partial file when the write fails', async (t) => {
   }
 })
 
+test('manage delete removes the original, its display copy and the manifest entry', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  await writeFile(join(dir, 'b.png'), PNG)
+  await mkdir(join(dir, '.display'))
+  await writeFile(join(dir, '.display', displayFileName('a.png')), JPEG)
+  await writeFile(join(dir, '.display', displayFileName('b.png')), JPEG)
+
+  const response = await manageResource(dir)(deleteRequest('a.png'))
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8')
+  assert.deepEqual(await response.json(), { ok: true, name: 'a.png' })
+
+  assert.deepEqual((await readdir(dir)).sort(), ['.display', 'b.png'])
+  assert.deepEqual(await readdir(join(dir, '.display')), [displayFileName('b.png')])
+
+  const manifestResponse = await createPhotoResource(dir)(new Request(`${ORIGIN}${ROUTE}/photos.json`))
+  const manifest = await manifestResponse.json()
+  assert.deepEqual(manifest.photos.map((photo) => photo.name), ['b.png'])
+})
+
+test('manage delete removes the name from .order.json and keeps the remaining order', async (t) => {
+  const dir = await makeWritableDir(t)
+  for (const name of ['a.png', 'b.png', 'c.png']) await writeFile(join(dir, name), PNG)
+  await writeFile(join(dir, '.order.json'), JSON.stringify(['c.png', 'a.png', 'b.png']))
+
+  const response = await manageResource(dir)(deleteRequest('a.png'))
+  assert.equal(response.status, 200)
+  assert.deepEqual(JSON.parse(await readFile(join(dir, '.order.json'), 'utf8')), ['c.png', 'b.png'])
+  assert.deepEqual((await readdir(dir)).sort(), ['.order.json', 'b.png', 'c.png'])
+})
+
+test('manage delete leaves other photos and an unrelated order file untouched', async (t) => {
+  const dir = await makeWritableDir(t)
+  for (const name of ['a.png', 'b.png']) await writeFile(join(dir, name), PNG)
+  await writeFile(join(dir, '.order.json'), JSON.stringify(['b.png']))
+
+  const response = await manageResource(dir)(deleteRequest('a.png'))
+  assert.equal(response.status, 200)
+  assert.deepEqual(await readdir(join(dir)), ['.order.json', 'b.png'])
+  assert.deepEqual(JSON.parse(await readFile(join(dir, '.order.json'), 'utf8')), ['b.png'])
+})
+
+test('manage delete tolerates a missing or corrupt .order.json', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  await writeFile(join(dir, 'b.png'), PNG)
+
+  const noOrder = await manageResource(dir)(deleteRequest('a.png'))
+  assert.equal(noOrder.status, 200)
+  assert.equal((await readdir(dir)).includes('.order.json'), false)
+
+  await writeFile(join(dir, '.order.json'), 'not json at all')
+  const corruptOrder = await manageResource(dir)(deleteRequest('b.png'))
+  assert.equal(corruptOrder.status, 200)
+  assert.equal(await readFile(join(dir, '.order.json'), 'utf8'), 'not json at all')
+  assert.deepEqual(await readdir(dir), ['.order.json'])
+})
+
+test('manage delete answers 404 for a name that is not in the photo folder', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+
+  const response = await manageResource(dir)(deleteRequest('missing.png'))
+  assert.equal(response.status, 404)
+  assert.equal((await response.json()).error, 'not-found')
+  assert.deepEqual(await readdir(dir), ['a.png'])
+})
+
+test('manage delete refuses traversal, hidden, malformed and over-long names', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  await writeFile(join(dir, 'notes.txt'), 'keep me')
+  const resource = manageResource(dir)
+
+  const invalidNames = [
+    '../evil.png',
+    '..\\evil.png',
+    'sub/dir.png',
+    '.hidden.png',
+    'bad\u0000.png',
+    `${'x'.repeat(121)}.png`,
+  ]
+  for (const name of invalidNames) {
+    const response = await resource(deleteRequest(name))
+    assert.equal(response.status, 400, `expected 400 for ${name}`)
+    assert.equal((await response.json()).error, 'invalid-name', `error for ${name}`)
+  }
+
+  const unknownType = await resource(deleteRequest('notes.txt'))
+  assert.equal(unknownType.status, 404)
+  assert.equal((await unknownType.json()).error, 'not-found')
+  assert.deepEqual((await readdir(dir)).sort(), ['a.png', 'notes.txt'])
+})
+
+test('manage delete refuses malformed JSON and non-string names with 400', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  const resource = manageResource(dir)
+
+  const malformed = await resource(deleteRequest('a.png', { body: '{"name": ' }))
+  assert.equal(malformed.status, 400)
+  assert.equal((await malformed.json()).error, 'invalid-request')
+
+  for (const body of ['{}', '{"name": 42}', 'null', '["a.png"]']) {
+    const response = await resource(deleteRequest('a.png', { body }))
+    assert.equal(response.status, 400, `expected 400 for ${body}`)
+    assert.equal((await response.json()).error, 'invalid-name', `error for ${body}`)
+  }
+  assert.deepEqual(await readdir(dir), ['a.png'])
+})
+
+test('manage delete refuses cross-origin and cross-site requests with 403', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+
+  const cases = [
+    deleteRequest('a.png', { origin: 'http://evil.example' }),
+    deleteRequest('a.png', { origin: null }),
+    deleteRequest('a.png', { secFetchSite: 'cross-site' }),
+  ]
+  for (const request of cases) {
+    const response = await manageResource(dir)(request)
+    assert.equal(response.status, 403)
+    assert.equal((await response.json()).error, 'forbidden')
+  }
+  assert.deepEqual(await readdir(dir), ['a.png'])
+})
+
 test('manage resource rejects non-POST methods, unknown actions and unknown paths', async (t) => {
   const dir = await makeWritableDir(t)
   const resource = manageResource(dir)
@@ -426,7 +567,7 @@ test('manage resource rejects non-POST methods, unknown actions and unknown path
   assert.equal(get.status, 405)
   assert.equal(get.headers.get('allow'), 'POST')
 
-  const unknownAction = await resource(new Request(`${ORIGIN}${MANAGE_PATH}?action=delete&name=a.png`, {
+  const unknownAction = await resource(new Request(`${ORIGIN}${MANAGE_PATH}?action=frobnicate&name=a.png`, {
     method: 'POST',
     headers: { origin: ORIGIN, 'content-type': 'application/json' },
     body: '{}',
