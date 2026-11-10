@@ -114,7 +114,7 @@ $DSH_HOME/dsh-snap-line/photos/
 └── .order.json             顺序（前 6 张上绳）
 
 详情页照片管理器 ── POST /dsh-snap-line/manage ──▶ Host 半 ──▶ 照片目录
-Client 半（晾衣绳 / 灯箱） ◀── GET /dsh-snap-line/photos.json、GET /dsh-snap-line/photos/<name> ── Host 半
+Client 半（晾衣绳 / 灯箱） ◀── GET /dsh-snap-line/photos.json、GET /dsh-snap-line/photos/<name>、GET /dsh-snap-line/display/<name> ── Host 半
 ```
 
 - **Host 半**（`index.js`）：`/dsh-snap-line` 前缀路由（`resource`，只处理 GET / HEAD）提供照片清单与图片；另有一个 `handler` 路由 `/dsh-snap-line/manage` 处理添加、删除、排序和显示版写入。写入端自己检查同源（`Origin` / `Sec-Fetch-Site`）、单张大小上限和图片 magic bytes，并用临时文件 + rename 原子写入；`lib/photos.js` 保持纯 Node、可独立单测；

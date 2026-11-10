@@ -114,7 +114,7 @@ $DSH_HOME/dsh-snap-line/photos/
 └── .order.json             order (the first six hang on the rope)
 
 photo manager (detail page) ── POST /dsh-snap-line/manage ──▶ Host half ──▶ photo folder
-Client half (clothesline / lightbox) ◀── GET /dsh-snap-line/photos.json, GET /dsh-snap-line/photos/<name> ── Host half
+Client half (clothesline / lightbox) ◀── GET /dsh-snap-line/photos.json, GET /dsh-snap-line/photos/<name>, GET /dsh-snap-line/display/<name> ── Host half
 ```
 
 - **Host half** (`index.js`): the `/dsh-snap-line` prefix route (`resource`, GET / HEAD only) serves the photo manifest and the images; a separate `handler` route at `/dsh-snap-line/manage` handles adding, deleting, ordering and display-copy writes. The write side checks same-origin (`Origin` / `Sec-Fetch-Site`) request policy itself, enforces the per-photo size cap and image magic bytes, and writes atomically via temp file + rename. `lib/photos.js` stays plain Node and unit-testable;

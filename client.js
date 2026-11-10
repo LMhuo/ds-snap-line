@@ -273,7 +273,6 @@ window.__ModuleLoader__.load({
     const TILTS = [-2.2, 1.4, -1.1, 2.0, -1.6, 0.9];
     const DELAYS = ['0s', '-1.8s', '-3.2s', '-0.7s', '-2.5s', '-4.1s'];
     const DURATIONS = ['7.6s', '6.8s', '8.2s', '7.1s', '6.5s', '7.8s'];
-    const MAX_PHOTOS = 6;
     const PHOTO_ENDPOINT = '/dsh-snap-line/photos.json';
     const POLL_INTERVAL_MS = 5000;
 
@@ -283,15 +282,6 @@ window.__ModuleLoader__.load({
       const spacing = Math.min(116, 464 / (count - 1));
       const first = 350 - (spacing * (count - 1)) / 2;
       return Array.from({ length: count }, (_, index) => Math.round((first + spacing * index) * 100) / 100);
-    }
-
-    function samplePhotos(photos, limit) {
-      if (photos.length <= limit) return photos;
-      const picked = [];
-      for (let index = 0; index < limit; index += 1) {
-        picked.push(photos[Math.round((index * (photos.length - 1)) / (limit - 1))]);
-      }
-      return picked;
     }
 
     /** Poll the host's photo listing so dropped or removed images show up on their own. */
@@ -310,12 +300,20 @@ window.__ModuleLoader__.load({
             const response = await fetch(PHOTO_ENDPOINT, { cache: 'no-store' });
             if (!response.ok) throw new Error('HTTP ' + response.status);
             const data = await response.json();
+            /* The Host decides which photos are on the rope; the Client only renders them. */
             const next = Array.isArray(data.photos)
               ? data.photos
-                  .filter((entry) => entry !== null && typeof entry === 'object' && typeof entry.url === 'string')
-                  .map((entry) => ({ url: entry.url, name: typeof entry.name === 'string' ? entry.name : '' }))
+                  .filter((entry) => entry !== null && typeof entry === 'object'
+                    && entry.onRope === true
+                    && typeof entry.displayUrl === 'string'
+                    && typeof entry.originalUrl === 'string')
+                  .map((entry) => ({
+                    name: typeof entry.name === 'string' ? entry.name : '',
+                    displayUrl: entry.displayUrl,
+                    originalUrl: entry.originalUrl,
+                  }))
               : [];
-            const key = next.map((entry) => entry.url).join('|');
+            const key = next.map((entry) => entry.displayUrl + '|' + entry.originalUrl).join('|');
             if (active && key !== lastKey) {
               lastKey = key;
               setPhotos(next);
@@ -469,7 +467,12 @@ window.__ModuleLoader__.load({
       }, [preview]);
       const usingOwnPhotos = Array.isArray(photos) && photos.length > 0;
       const items = usingOwnPhotos
-        ? samplePhotos(photos, MAX_PHOTOS).map((photo) => ({ kind: 'photo', url: photo.url, name: photo.name }))
+        ? photos.map((photo) => ({
+            kind: 'photo',
+            displayUrl: photo.displayUrl,
+            originalUrl: photo.originalUrl,
+            name: photo.name,
+          }))
         : ILLUSTRATIONS.map((scene) => ({ kind: 'illustration', scene }));
       const xs = photoPositions(items.length);
       return h('div', {
@@ -507,9 +510,9 @@ window.__ModuleLoader__.load({
           h('circle', { cx: 18, cy: 14, r: 2.6, fill: '#8a7a63' }),
           h('circle', { cx: 682, cy: 14, r: 2.6, fill: '#8a7a63' }),
           items.map((item, index) => {
-            const content = item.kind === 'photo' ? userPhotoImage(item.url) : item.scene();
+            const content = item.kind === 'photo' ? userPhotoImage(item.displayUrl) : item.scene();
             return h(Photo, {
-              key: item.kind === 'photo' ? 'photo-' + item.url : 'illustration-' + index,
+              key: item.kind === 'photo' ? 'photo-' + item.name : 'illustration-' + index,
               x: xs[index],
               tilt: TILTS[index % TILTS.length],
               delay: DELAYS[index % DELAYS.length],
@@ -520,7 +523,7 @@ window.__ModuleLoader__.load({
                 : '内置插画 ' + (index + 1) + ' / Built-in illustration ' + (index + 1),
               onOpen: () => setPreview(
                 item.kind === 'photo'
-                  ? { kind: 'photo', url: item.url, name: item.name }
+                  ? { kind: 'photo', url: item.originalUrl, name: item.name }
                   : { kind: 'illustration', content },
               ),
             });
