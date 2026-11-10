@@ -278,6 +278,8 @@ window.__ModuleLoader__.load({
     const PHOTOS_CHANGED_EVENT = 'dsh-snap-line:photos-changed';
     const POLL_INTERVAL_MS = 5000;
     const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+    const DISPLAY_MAX_EDGE = 1280;
+    const DISPLAY_JPEG_QUALITY = 0.82;
 
     /** Evenly spread photo centers along the rope, capped at the old five-photo spacing. */
     function photoPositions(count) {
@@ -643,6 +645,105 @@ window.__ModuleLoader__.load({
       return { name: payload !== null && typeof payload.name === 'string' ? payload.name : file.name };
     }
 
+    /* --- Display copies --------------------------------------------------
+     * The rope and the list load a small JPEG; the lightbox keeps the original.
+     * Everything here is best-effort: a browser that cannot decode or encode a
+     * photo leaves the manifest's original-image fallback in place.
+     */
+
+    function loadImageElement(url) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.decoding = 'async';
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('dsh-snap-line: image decode failed'));
+        image.src = url;
+      });
+    }
+
+    function canvasJpeg(canvas) {
+      return new Promise((resolve) => {
+        try {
+          canvas.toBlob(
+            (blob) => resolve(blob !== null && blob.type === 'image/jpeg' ? blob : null),
+            'image/jpeg',
+            DISPLAY_JPEG_QUALITY,
+          );
+        } catch {
+          resolve(null);
+        }
+      });
+    }
+
+    /**
+     * Downsample one photo to a JPEG display copy: longest edge at most 1280px,
+     * quality 0.82, EXIF orientation applied. Animated GIF/AVIF decode to their
+     * first frame; the original file is never modified. Returns null when the
+     * browser cannot produce a copy.
+     */
+    async function createDisplayCopy(source) {
+      let bitmap = null;
+      let objectUrl = null;
+      try {
+        if (typeof createImageBitmap === 'function') {
+          try {
+            bitmap = await createImageBitmap(source, { imageOrientation: 'from-image' });
+          } catch {
+            bitmap = null;
+          }
+        }
+        let image = null;
+        if (bitmap === null) {
+          objectUrl = URL.createObjectURL(source);
+          image = await loadImageElement(objectUrl);
+        }
+        const sourceWidth = bitmap !== null ? bitmap.width : image.naturalWidth;
+        const sourceHeight = bitmap !== null ? bitmap.height : image.naturalHeight;
+        if (!(sourceWidth > 0) || !(sourceHeight > 0)) return null;
+        const scale = Math.min(1, DISPLAY_MAX_EDGE / Math.max(sourceWidth, sourceHeight));
+        const width = Math.max(1, Math.round(sourceWidth * scale));
+        const height = Math.max(1, Math.round(sourceHeight * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (context === null) return null;
+        /* JPEG has no alpha: paint the frame white instead of letting it go black. */
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, width, height);
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
+        context.drawImage(bitmap !== null ? bitmap : image, 0, 0, width, height);
+        return await canvasJpeg(canvas);
+      } finally {
+        if (bitmap !== null && typeof bitmap.close === 'function') bitmap.close();
+        if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
+      }
+    }
+
+    async function uploadDisplayCopy(name, blob) {
+      const response = await fetch(
+        MANAGE_ENDPOINT + '?action=display&name=' + encodeURIComponent(name),
+        {
+          method: 'POST',
+          headers: { 'content-type': 'image/jpeg' },
+          body: blob,
+        },
+      );
+      return response.ok;
+    }
+
+    /** Generate and store one display copy; false means the original fallback stays. */
+    async function storeDisplayCopy(name, source) {
+      try {
+        const blob = await createDisplayCopy(source);
+        if (blob === null) return false;
+        return await uploadDisplayCopy(name, blob);
+      } catch {
+        return false;
+      }
+    }
+
     function PhotoManager(props) {
       const { t } = props;
       const photos = useManifest(false);
@@ -653,9 +754,53 @@ window.__ModuleLoader__.load({
       const [confirming, setConfirming] = React.useState('');
       const [deleting, setDeleting] = React.useState('');
       const inputRef = React.useRef(null);
+      /* Generated at most once per photo per manager open; a later open retries. */
+      const attemptedDisplays = React.useRef(new Set());
+      const busyDisplays = React.useRef(new Set());
       const deleteButtonRefs = React.useRef({});
       const confirmButtonRef = React.useRef(null);
       const restoreFocusTo = React.useRef('');
+
+      /*
+       * Backfill display copies for photos that predate the photo manager or
+       * were dropped into the folder by hand. Skip photos that already have
+       * one, and treat every failure as non-fatal: the original still shows.
+       */
+      React.useEffect(() => {
+        if (photos === null) return;
+        const pending = photos.filter((photo) => photo.name !== ''
+          && photo.displayUrl === photo.originalUrl
+          && !attemptedDisplays.current.has(photo.name));
+        if (pending.length === 0) return;
+        let cancelled = false;
+        void (async () => {
+          let uploaded = false;
+          for (const photo of pending) {
+            if (cancelled) return;
+            /* Marked here, not up front, so a React StrictMode re-run still works. */
+            if (attemptedDisplays.current.has(photo.name)) continue;
+            attemptedDisplays.current.add(photo.name);
+            if (busyDisplays.current.has(photo.name)) continue;
+            busyDisplays.current.add(photo.name);
+            try {
+              let source = null;
+              try {
+                const response = await fetch(photo.originalUrl);
+                if (response.ok) source = await response.blob();
+              } catch {
+                source = null;
+              }
+              if (source !== null && await storeDisplayCopy(photo.name, source)) uploaded = true;
+            } finally {
+              busyDisplays.current.delete(photo.name);
+            }
+          }
+          if (!cancelled && uploaded) window.dispatchEvent(new Event(PHOTOS_CHANGED_EVENT));
+        })();
+        return () => {
+          cancelled = true;
+        };
+      }, [photos]);
 
       /* Move focus into the confirm step, and back to the delete control when it closes. */
       React.useEffect(() => {
@@ -680,8 +825,18 @@ window.__ModuleLoader__.load({
         let added = 0;
         for (const file of files) {
           const result = await uploadPhoto(file, t);
-          if (result.error !== undefined) failures.push(result.error);
-          else added += 1;
+          if (result.error !== undefined) {
+            failures.push(result.error);
+            continue;
+          }
+          added += 1;
+          /* The original is already listed if this best-effort copy fails. */
+          busyDisplays.current.add(result.name);
+          try {
+            await storeDisplayCopy(result.name, file);
+          } finally {
+            busyDisplays.current.delete(result.name);
+          }
         }
         setBusy(false);
         setErrors(failures);

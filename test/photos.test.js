@@ -121,6 +121,18 @@ test('listPhotos revision follows display-copy creation', async (t) => {
   assert.notEqual(photo.displayUrl, photo.originalUrl)
 })
 
+test('listPhotos falls back to the original when a display copy is corrupted', async (t) => {
+  const { dir } = await makeOrderedFixture(t)
+  const copy = join(dir, '.display', displayFileName('photo 2.png'))
+
+  for (const corrupted of [Buffer.from('not a jpeg'), Buffer.alloc(0)]) {
+    await writeFile(copy, corrupted)
+    const listing = await listPhotos(dir)
+    const photo = listing.photos.find((entry) => entry.name === 'photo 2.png')
+    assert.equal(photo.displayUrl, photo.originalUrl, `fallback for ${corrupted.length} bytes`)
+  }
+})
+
 test('servePhoto returns bytes with the media type and no-sniff header', async (t) => {
   const dir = await makeFixture(t)
   const response = await servePhoto(dir, encodeURIComponent('photo 10.webp'))
@@ -264,6 +276,17 @@ function addRequest(name, body, options = {}) {
     headers,
     body,
   })
+}
+
+function displayRequest(name, body, options = {}) {
+  const headers = {}
+  const contentType = options.contentType === undefined ? 'image/jpeg' : options.contentType
+  if (contentType !== null) headers['content-type'] = contentType
+  const origin = options.origin === undefined ? ORIGIN : options.origin
+  if (origin !== null) headers.origin = origin
+  if (options.secFetchSite !== undefined) headers['sec-fetch-site'] = options.secFetchSite
+  const url = `${ORIGIN}${MANAGE_PATH}?action=display&name=${encodeURIComponent(name)}`
+  return new Request(url, { method: 'POST', headers, body })
 }
 
 function deleteRequest(name, options = {}) {
@@ -430,6 +453,46 @@ test('manage add leaves no partial file when the write fails', async (t) => {
   }
 })
 
+test('manage display stores a hidden display copy that the manifest and read route serve', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  const display = Buffer.concat([JPEG, Buffer.from('display-copy')])
+
+  const response = await manageResource(dir)(displayRequest('a.png', display))
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8')
+  assert.deepEqual(await response.json(), { ok: true, name: 'a.png' })
+  assert.deepEqual(await readFile(join(dir, '.display', displayFileName('a.png'))), display)
+  assert.deepEqual(await readdir(join(dir, '.display')), [displayFileName('a.png')])
+  assert.deepEqual((await readdir(dir)).sort(), ['.display', 'a.png'])
+  assert.deepEqual(await readFile(join(dir, 'a.png')), PNG, 'the original bytes are untouched')
+
+  const resource = createPhotoResource(dir)
+  const manifest = await (await resource(new Request(`${ORIGIN}${ROUTE}/photos.json`))).json()
+  assert.deepEqual(manifest.photos.map((entry) => entry.name), ['a.png'])
+  const photo = manifest.photos.find((entry) => entry.name === 'a.png')
+  assert.match(photo.displayUrl, new RegExp(`^${ROUTE}/display/a\\.png\\?v=\\d+$`))
+  assert.notEqual(photo.displayUrl, photo.originalUrl)
+
+  const served = await resource(new Request(`${ORIGIN}${photo.displayUrl}`))
+  assert.equal(served.status, 200)
+  assert.equal(served.headers.get('content-type'), 'image/jpeg')
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), display)
+})
+
+test('manage display rejects an unknown original name without writing a copy', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'notes.txt'), 'not an image')
+  const resource = manageResource(dir)
+
+  for (const name of ['missing.png', 'missing.jpg', 'missing.avif']) {
+    const response = await resource(displayRequest(name, JPEG))
+    assert.equal(response.status, 404, `expected 404 for ${name}`)
+    assert.equal((await response.json()).error, 'not-found', `error for ${name}`)
+  }
+  assert.deepEqual(await readdir(dir), ['notes.txt'])
+})
+
 test('manage delete removes the original, its display copy and the manifest entry', async (t) => {
   const dir = await makeWritableDir(t)
   await writeFile(join(dir, 'a.png'), PNG)
@@ -525,6 +588,37 @@ test('manage delete refuses traversal, hidden, malformed and over-long names', a
   assert.deepEqual((await readdir(dir)).sort(), ['a.png', 'notes.txt'])
 })
 
+test('manage display only accepts JPEG bytes declared as image/jpeg', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  const resource = manageResource(dir)
+
+  const wrongType = await resource(displayRequest('a.png', JPEG, { contentType: 'image/png' }))
+  assert.equal(wrongType.status, 415)
+  assert.equal((await wrongType.json()).error, 'unsupported-media-type')
+
+  const missingType = await resource(displayRequest('a.png', JPEG, { contentType: null }))
+  assert.equal(missingType.status, 415)
+
+  const wrongMagic = await resource(displayRequest('a.png', PNG))
+  assert.equal(wrongMagic.status, 400)
+  assert.equal((await wrongMagic.json()).error, 'magic-mismatch')
+
+  assert.deepEqual(await readdir(dir), ['a.png'])
+})
+
+test('manage display refuses a body over the photo size cap with 413 and writes nothing', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  const oversized = Buffer.alloc(MAX_PHOTO_BYTES + 1)
+  JPEG.copy(oversized, 0)
+
+  const response = await manageResource(dir)(displayRequest('a.png', oversized))
+  assert.equal(response.status, 413)
+  assert.equal((await response.json()).error, 'too-large')
+  assert.deepEqual(await readdir(dir), ['a.png'])
+})
+
 test('manage delete refuses malformed JSON and non-string names with 400', async (t) => {
   const dir = await makeWritableDir(t)
   await writeFile(join(dir, 'a.png'), PNG)
@@ -542,9 +636,28 @@ test('manage delete refuses malformed JSON and non-string names with 400', async
   assert.deepEqual(await readdir(dir), ['a.png'])
 })
 
-test('manage delete refuses cross-origin and cross-site requests with 403', async (t) => {
+test('manage display refuses cross-origin, origin-less and cross-site writes with 403', async (t) => {
   const dir = await makeWritableDir(t)
   await writeFile(join(dir, 'a.png'), PNG)
+  const resource = manageResource(dir)
+
+  const cases = [
+    displayRequest('a.png', JPEG, { origin: 'http://evil.example' }),
+    displayRequest('a.png', JPEG, { origin: null }),
+    displayRequest('a.png', JPEG, { secFetchSite: 'cross-site' }),
+  ]
+  for (const request of cases) {
+    const response = await resource(request)
+    assert.equal(response.status, 403)
+    assert.equal((await response.json()).error, 'forbidden')
+  }
+  assert.deepEqual(await readdir(dir), ['a.png'])
+})
+
+test('manage delete refuses cross-origin, origin-less and cross-site writes with 403', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  const resource = manageResource(dir)
 
   const cases = [
     deleteRequest('a.png', { origin: 'http://evil.example' }),
@@ -552,9 +665,22 @@ test('manage delete refuses cross-origin and cross-site requests with 403', asyn
     deleteRequest('a.png', { secFetchSite: 'cross-site' }),
   ]
   for (const request of cases) {
-    const response = await manageResource(dir)(request)
+    const response = await resource(request)
     assert.equal(response.status, 403)
     assert.equal((await response.json()).error, 'forbidden')
+  }
+  assert.deepEqual(await readdir(dir), ['a.png'])
+})
+
+test('manage display refuses traversal, hidden and unsupported names with 400', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  const resource = manageResource(dir)
+
+  for (const name of ['../evil.png', '..\\evil.png', 'sub/a.png', '.hidden.png', 'bad\u0000.png', 'a.heic', 'a.txt']) {
+    const response = await resource(displayRequest(name, JPEG))
+    assert.equal(response.status, 400, `expected 400 for ${name}`)
+    assert.equal((await response.json()).error, 'invalid-name', `error for ${name}`)
   }
   assert.deepEqual(await readdir(dir), ['a.png'])
 })
