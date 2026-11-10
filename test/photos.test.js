@@ -44,6 +44,68 @@ async function makeOrderedFixture(t) {
   return { dir, names }
 }
 
+async function makePhotoDir(t, names) {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-snap-line-listing-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  for (const name of names) await writeFile(join(dir, name), PNG)
+  return dir
+}
+
+test('listPhotos puts photos recorded in .order.json first and appends the rest naturally', async (t) => {
+  const dir = await makePhotoDir(t, ['a.jpg', 'b.png', 'c.webp', 'd.gif'])
+  await writeFile(join(dir, '.order.json'), JSON.stringify(['c.webp', 'a.jpg']))
+
+  const listing = await listPhotos(dir)
+  assert.deepEqual(listing.photos.map((photo) => photo.name), ['c.webp', 'a.jpg', 'b.png', 'd.gif'])
+})
+
+test('listPhotos skips order entries that no longer exist and collapses duplicates', async (t) => {
+  const dir = await makePhotoDir(t, ['a.jpg', 'b.png', 'c.webp'])
+  await writeFile(
+    join(dir, '.order.json'),
+    JSON.stringify(['missing.png', 'c.webp', 'c.webp', 'a.jpg']),
+  )
+
+  const listing = await listPhotos(dir)
+  assert.deepEqual(listing.photos.map((photo) => photo.name), ['c.webp', 'a.jpg', 'b.png'])
+})
+
+test('listPhotos marks the first six photos of the recorded order as on the rope', async (t) => {
+  const { dir, names } = await makeOrderedFixture(t)
+  const reversed = [...names].reverse()
+  await writeFile(join(dir, '.order.json'), JSON.stringify(reversed))
+
+  const listing = await listPhotos(dir)
+  assert.deepEqual(listing.photos.map((photo) => photo.name), reversed)
+  assert.deepEqual(
+    listing.photos.filter((photo) => photo.onRope).map((photo) => photo.name),
+    reversed.slice(0, 6),
+  )
+})
+
+test('listPhotos falls back to natural order when .order.json is corrupt or not a name array', async (t) => {
+  const naturals = ['a.jpg', 'b.png', 'c.webp']
+  for (const content of ['{not json', 'null', '"b.png"', JSON.stringify({ names: ['b.png'] })]) {
+    const dir = await makePhotoDir(t, naturals)
+    await writeFile(join(dir, '.order.json'), content)
+    const listing = await listPhotos(dir)
+    assert.deepEqual(
+      listing.photos.map((photo) => photo.name),
+      naturals,
+      `content: ${content}`,
+    )
+  }
+})
+
+test('listPhotos revision follows the recorded order', async (t) => {
+  const dir = await makePhotoDir(t, ['a.jpg', 'b.png', 'c.webp'])
+  const first = await listPhotos(dir)
+  await writeFile(join(dir, '.order.json'), JSON.stringify(['c.webp', 'b.png', 'a.jpg']))
+  const second = await listPhotos(dir)
+  assert.notEqual(second.revision, first.revision)
+  assert.deepEqual(second.photos.map((photo) => photo.name), ['c.webp', 'b.png', 'a.jpg'])
+})
+
 test('photoFolder uses $DSH_HOME/dsh-snap-line/photos when DSH_HOME is set', () => {
   const folder = photoFolder({ DSH_HOME: '/tmp/snap-home' }, '/home/tester')
   assert.equal(folder, join('/tmp/snap-home', 'dsh-snap-line', 'photos'))
@@ -266,6 +328,20 @@ function addRequest(name, body, options = {}) {
   })
 }
 
+function orderRequest(names, options = {}) {
+  const headers = {
+    'content-type': options.contentType === undefined ? 'application/json' : options.contentType,
+  }
+  const origin = options.origin === undefined ? ORIGIN : options.origin
+  if (origin !== null) headers.origin = origin
+  if (options.secFetchSite !== undefined) headers['sec-fetch-site'] = options.secFetchSite
+  return new Request(`${ORIGIN}${MANAGE_PATH}?action=order`, {
+    method: 'POST',
+    headers,
+    body: options.body === undefined ? JSON.stringify({ names }) : options.body,
+  })
+}
+
 /** A PNG signature plus an IHDR that declares the requested pixel size. */
 function pngOfSize(width, height) {
   const header = Buffer.alloc(24)
@@ -443,4 +519,123 @@ test('manage resource rejects non-POST methods, unknown actions and unknown path
 
   const elsewhere = await resource(new Request(`${ORIGIN}${ROUTE}/photos.json`, { method: 'POST' }))
   assert.equal(elsewhere.status, 404)
+})
+
+test('manage order writes .order.json and the manifest follows it', async (t) => {
+  const dir = await makeWritableDir(t)
+  for (const name of ['a.png', 'b.png', 'c.png']) await writeFile(join(dir, name), PNG)
+
+  const response = await manageResource(dir)(orderRequest(['c.png', 'a.png']))
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8')
+  assert.deepEqual(await response.json(), { ok: true, names: ['c.png', 'a.png'] })
+  assert.deepEqual(JSON.parse(await readFile(join(dir, '.order.json'), 'utf8')), ['c.png', 'a.png'])
+  assert.deepEqual(
+    (await readdir(dir)).filter((name) => name.endsWith('.tmp')),
+    [],
+    'no temp file is left behind',
+  )
+
+  const manifest = await (await createPhotoResource(dir)(
+    new Request(`${ORIGIN}${ROUTE}/photos.json`),
+  )).json()
+  assert.deepEqual(manifest.photos.map((photo) => photo.name), ['c.png', 'a.png', 'b.png'])
+  assert.deepEqual(
+    manifest.photos.filter((photo) => photo.onRope).map((photo) => photo.name),
+    ['c.png', 'a.png', 'b.png'],
+  )
+})
+
+test('manage order ignores missing names, collapses duplicates and can reset to natural order', async (t) => {
+  const dir = await makeWritableDir(t)
+  for (const name of ['a.png', 'b.png', 'c.png']) await writeFile(join(dir, name), PNG)
+
+  const resource = manageResource(dir)
+  const response = await resource(orderRequest(['missing.png', 'b.png', 'b.png', 'c.png']))
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { ok: true, names: ['b.png', 'c.png'] })
+
+  const manifest = await (await createPhotoResource(dir)(
+    new Request(`${ORIGIN}${ROUTE}/photos.json`),
+  )).json()
+  assert.deepEqual(manifest.photos.map((photo) => photo.name), ['b.png', 'c.png', 'a.png'])
+
+  const reset = await resource(orderRequest([]))
+  assert.equal(reset.status, 200)
+  assert.deepEqual(await reset.json(), { ok: true, names: [] })
+  assert.deepEqual(JSON.parse(await readFile(join(dir, '.order.json'), 'utf8')), [])
+  const natural = await (await createPhotoResource(dir)(
+    new Request(`${ORIGIN}${ROUTE}/photos.json`),
+  )).json()
+  assert.deepEqual(natural.photos.map((photo) => photo.name), ['a.png', 'b.png', 'c.png'])
+})
+
+test('manage order refuses malformed, mistyped and oversized bodies without writing', async (t) => {
+  const dir = await makeWritableDir(t)
+  for (const name of ['a.png', 'b.png']) await writeFile(join(dir, name), PNG)
+  const resource = manageResource(dir)
+
+  const notJson = await resource(orderRequest(null, { contentType: 'text/plain', body: '{}' }))
+  assert.equal(notJson.status, 415)
+  const heic = await resource(orderRequest(null, { contentType: 'image/png', body: PNG }))
+  assert.equal(heic.status, 415)
+
+  for (const body of ['{not json', '{}', '{"names":"a.png"}', '{"names":[42]}']) {
+    const response = await resource(orderRequest(null, { body }))
+    assert.equal(response.status, 400, `body: ${body}`)
+    const payload = await response.json()
+    assert.ok(payload.error === 'invalid-order' || payload.error === 'invalid-name', `body: ${body}`)
+  }
+
+  const traversal = await resource(orderRequest(['../evil.png']))
+  assert.equal(traversal.status, 400)
+  assert.equal((await traversal.json()).error, 'invalid-name')
+
+  const oversized = JSON.stringify({
+    names: Array.from({ length: 2000 }, (_, index) => `photo-${index}-${'x'.repeat(32)}.png`),
+  })
+  const tooLarge = await resource(orderRequest(null, { body: oversized }))
+  assert.equal(tooLarge.status, 413)
+  assert.equal((await tooLarge.json()).error, 'too-large')
+
+  assert.deepEqual((await readdir(dir)).sort(), ['a.png', 'b.png'])
+})
+
+test('manage order keeps the same-origin policy', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+  const resource = manageResource(dir)
+  const requests = [
+    orderRequest(['a.png'], { origin: 'http://evil.example' }),
+    orderRequest(['a.png'], { origin: null }),
+    orderRequest(['a.png'], { secFetchSite: 'cross-site' }),
+  ]
+  for (const request of requests) {
+    const response = await resource(request)
+    assert.equal(response.status, 403)
+    assert.equal((await response.json()).error, 'forbidden')
+  }
+  assert.deepEqual(await readdir(dir), ['a.png'])
+})
+
+test('manage order leaves the previous order intact when the write fails', async (t) => {
+  const dir = await makeWritableDir(t)
+  for (const name of ['a.png', 'b.png']) await writeFile(join(dir, name), PNG)
+  const resource = manageResource(dir)
+  assert.equal((await resource(orderRequest(['b.png', 'a.png']))).status, 200)
+
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    t.skip('running as root: a read-only directory does not refuse writes')
+    return
+  }
+  await chmod(dir, 0o500)
+  try {
+    const response = await resource(orderRequest(['a.png']))
+    assert.equal(response.status, 500)
+    assert.equal((await response.json()).error, 'write-failed')
+    assert.deepEqual(JSON.parse(await readFile(join(dir, '.order.json'), 'utf8')), ['b.png', 'a.png'])
+    assert.deepEqual((await readdir(dir)).filter((name) => name.endsWith('.tmp')), [])
+  } finally {
+    await chmod(dir, 0o700)
+  }
 })

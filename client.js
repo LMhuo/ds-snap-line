@@ -320,7 +320,9 @@ window.__ModuleLoader__.load({
                     onRope: entry.onRope === true,
                   }))
               : [];
-            const key = next.map((entry) => entry.displayUrl + '|' + entry.originalUrl).join('|');
+            const key = next
+              .map((entry) => entry.name + '|' + entry.onRope + '|' + entry.displayUrl + '|' + entry.originalUrl)
+              .join('|');
             if (active && key !== lastKey) {
               lastKey = key;
               setPhotos(next);
@@ -381,6 +383,16 @@ window.__ModuleLoader__.load({
         dropHint: '把照片拖到这里，或选择文件；支持 JPG、PNG、WebP、GIF、AVIF，单张不超过 25MB。',
         photoList: '照片列表',
         photoItem: '照片 {position}：{name}',
+        reorderHint: '拖动缩略图，或用每一张的上移/下移按钮调整顺序；排在前六张的照片在绳上。',
+        moveUp: '上移',
+        moveDown: '下移',
+        moveUpPhoto: '上移照片 {position}：{name}',
+        moveDownPhoto: '下移照片 {position}：{name}',
+        reordering: '正在保存顺序…',
+        orderSaved: '顺序已更新。',
+        errorOrder: '顺序保存失败，请稍后重试。',
+        errorOrderForbidden: '顺序保存被拒绝，请刷新页面后重试。',
+        errorOrderInvalid: '顺序请求无效，请刷新页面后重试。',
         onRope: '在绳上',
         offRope: '未上绳',
         added: '已添加 {count} 张照片。',
@@ -403,6 +415,16 @@ window.__ModuleLoader__.load({
         dropHint: 'Drop photos here or choose files; JPG, PNG, WebP, GIF and AVIF, up to 25MB each.',
         photoList: 'Photo list',
         photoItem: 'Photo {position}: {name}',
+        reorderHint: 'Drag thumbnails, or use each photo\'s Move up / Move down buttons; the first six photos hang on the rope.',
+        moveUp: 'Move up',
+        moveDown: 'Move down',
+        moveUpPhoto: 'Move photo {position} up: {name}',
+        moveDownPhoto: 'Move photo {position} down: {name}',
+        reordering: 'Saving the order…',
+        orderSaved: 'Order updated.',
+        errorOrder: 'Could not save the order; try again later.',
+        errorOrderForbidden: 'The order write was refused; refresh the page and try again.',
+        errorOrderInvalid: 'The order request was invalid; refresh the page and try again.',
         onRope: 'On the rope',
         offRope: 'Off the rope',
         added: 'Added {count} photos.',
@@ -459,6 +481,10 @@ window.__ModuleLoader__.load({
         opacity: 0.78;
         flex: 1 1 220px;
       }
+      .sl-manager-reorder-hint {
+        margin: 0;
+        opacity: 0.78;
+      }
       .sl-manager-button {
         padding: 6px 12px;
         border: 1px solid rgba(128, 128, 128, 0.5);
@@ -503,6 +529,47 @@ window.__ModuleLoader__.load({
         flex-direction: column;
         gap: 4px;
         min-width: 0;
+      }
+      .sl-manager-item[draggable="true"] {
+        cursor: grab;
+      }
+      .sl-manager-item-dragging {
+        opacity: 0.55;
+      }
+      .sl-manager-item-over {
+        outline: 2px dashed rgba(128, 128, 128, 0.9);
+        outline-offset: 3px;
+        border-radius: 8px;
+      }
+      .sl-manager-actions {
+        display: flex;
+        gap: 4px;
+      }
+      .sl-manager-move {
+        flex: 1 1 0;
+        padding: 1px 0;
+        border: 1px solid rgba(128, 128, 128, 0.5);
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        line-height: 1.4;
+        cursor: pointer;
+      }
+      .sl-manager-move:hover:not(:disabled) {
+        background: rgba(128, 128, 128, 0.12);
+      }
+      .sl-manager-move:focus-visible {
+        outline: 2px solid rgba(128, 128, 128, 0.9);
+        outline-offset: 2px;
+      }
+      .sl-manager-move:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .sl-manager-error {
+        margin: 0;
+        color: #c0392b;
       }
       .sl-manager-thumb {
         display: block;
@@ -597,6 +664,33 @@ window.__ModuleLoader__.load({
       return { name: payload !== null && typeof payload.name === 'string' ? payload.name : file.name };
     }
 
+    const ORDER_ERROR_KEYS = {
+      forbidden: 'errorOrderForbidden',
+      'invalid-order': 'errorOrderInvalid',
+      'invalid-name': 'errorOrderInvalid',
+      'too-large': 'errorOrderInvalid',
+      'unsupported-media-type': 'errorOrderInvalid',
+    };
+
+    /** Write the full name array; the Host normalizes it and the manifest follows. */
+    async function saveOrder(names, t) {
+      try {
+        const response = await fetch(MANAGE_ENDPOINT + '?action=order', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ names }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const code = payload !== null && typeof payload.error === 'string' ? payload.error : '';
+          return { error: t(ORDER_ERROR_KEYS[code] || 'errorOrder') };
+        }
+      } catch {
+        return { error: t('errorOrder') };
+      }
+      return { ok: true };
+    }
+
     function PhotoManager(props) {
       const { t } = props;
       const photos = useManifest(false);
@@ -604,6 +698,10 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState('');
       const [busy, setBusy] = React.useState(false);
       const [dragging, setDragging] = React.useState(false);
+      const [ordering, setOrdering] = React.useState(false);
+      const [orderError, setOrderError] = React.useState('');
+      const [dragIndex, setDragIndex] = React.useState(null);
+      const [dropIndex, setDropIndex] = React.useState(null);
       const inputRef = React.useRef(null);
 
       const addFiles = async (fileList) => {
@@ -611,6 +709,7 @@ window.__ModuleLoader__.load({
         if (files.length === 0) return;
         setBusy(true);
         setErrors([]);
+        setOrderError('');
         setNotice('');
         const failures = [];
         let added = 0;
@@ -638,8 +737,67 @@ window.__ModuleLoader__.load({
         setDragging(true);
       };
 
+      const persistOrder = async (ordered) => {
+        setOrdering(true);
+        setOrderError('');
+        setNotice(t('reordering'));
+        const result = await saveOrder(ordered.map((photo) => photo.name), t);
+        setOrdering(false);
+        if (result.error !== undefined) {
+          setNotice('');
+          setOrderError(result.error);
+          return;
+        }
+        setNotice(t('orderSaved'));
+        window.dispatchEvent(new Event(PHOTOS_CHANGED_EVENT));
+      };
+
+      /** Splice the dragged photo to the drop position, then persist the whole order. */
+      const movePhoto = (from, to) => {
+        if (photos === null || busy || ordering) return;
+        if (from === to || from < 0 || to < 0 || from >= photos.length || to >= photos.length) return;
+        const next = photos.slice();
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        void persistOrder(next);
+      };
+
+      const startDrag = (event, index) => {
+        if (busy || ordering) {
+          event.preventDefault();
+          return;
+        }
+        setDragIndex(index);
+        setDropIndex(index);
+        if (event.dataTransfer !== null) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', photos === null ? '' : photos[index].name);
+        }
+      };
+      const dragOverItem = (event, index) => {
+        if (dragIndex === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'move';
+        setDropIndex(index);
+      };
+      const dropOnItem = (event, index) => {
+        if (dragIndex === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const from = dragIndex;
+        setDragIndex(null);
+        setDropIndex(null);
+        movePhoto(from, index);
+      };
+      const endDrag = () => {
+        setDragIndex(null);
+        setDropIndex(null);
+      };
+
       const total = photos === null ? 0 : photos.length;
       const onRope = photos === null ? 0 : photos.filter((photo) => photo.onRope).length;
+      const reorderDisabled = busy || ordering;
       return h('section', { className: 'sl-manager', 'aria-label': t('title') },
         h('style', { key: 'css' }, MANAGER_CSS),
         h('div', { className: 'sl-manager-header' },
@@ -682,16 +840,31 @@ window.__ModuleLoader__.load({
         ),
         errors.length === 0 ? null : h('ul', { className: 'sl-manager-errors', role: 'alert' },
           errors.map((message, index) => h('li', { key: index }, message))),
+        orderError === '' ? null : h('p', { className: 'sl-manager-error', role: 'alert' }, orderError),
         notice === '' ? null : h('p', { className: 'sl-manager-notice', role: 'status', 'aria-live': 'polite' }, notice),
+        photos !== null && photos.length > 1
+          ? h('p', { className: 'sl-manager-reorder-hint' }, t('reorderHint'))
+          : null,
         photos === null
           ? h('p', { className: 'sl-manager-hint' }, t('loading'))
           : photos.length === 0
             ? h('p', { className: 'sl-manager-hint' }, t('empty'))
-            : h('ul', { className: 'sl-manager-list', 'aria-label': t('photoList') },
+            : h('ul', {
+                className: 'sl-manager-list',
+                'aria-label': t('photoList'),
+                'aria-busy': ordering ? 'true' : 'false',
+              },
                 photos.map((photo, index) => h('li', {
                   key: photo.name,
-                  className: 'sl-manager-item',
+                  className: 'sl-manager-item'
+                    + (dragIndex === index ? ' sl-manager-item-dragging' : '')
+                    + (dropIndex === index && dragIndex !== null ? ' sl-manager-item-over' : ''),
                   'aria-label': t('photoItem', { position: index + 1, name: photo.name }),
+                  draggable: !reorderDisabled,
+                  onDragStart: (event) => startDrag(event, index),
+                  onDragOver: (event) => dragOverItem(event, index),
+                  onDrop: (event) => dropOnItem(event, index),
+                  onDragEnd: endDrag,
                 },
                   h('img', {
                     className: 'sl-manager-thumb',
@@ -705,6 +878,24 @@ window.__ModuleLoader__.load({
                       ? 'sl-manager-badge'
                       : 'sl-manager-badge sl-manager-badge-off',
                   }, photo.onRope ? t('onRope') : t('offRope')),
+                  h('div', { className: 'sl-manager-actions' },
+                    h('button', {
+                      type: 'button',
+                      className: 'sl-manager-move',
+                      disabled: reorderDisabled || index === 0,
+                      'aria-label': t('moveUpPhoto', { position: index + 1, name: photo.name }),
+                      title: t('moveUp'),
+                      onClick: () => movePhoto(index, index - 1),
+                    }, '↑'),
+                    h('button', {
+                      type: 'button',
+                      className: 'sl-manager-move',
+                      disabled: reorderDisabled || index === photos.length - 1,
+                      'aria-label': t('moveDownPhoto', { position: index + 1, name: photo.name }),
+                      title: t('moveDown'),
+                      onClick: () => movePhoto(index, index + 1),
+                    }, '↓'),
+                  ),
                 ))),
       );
     }
