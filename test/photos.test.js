@@ -1,9 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createPhotoResource, displayFileName, listPhotos, photoFolder, ROUTE, servePhoto } from '../lib/photos.js'
+import {
+  createManageResource,
+  createPhotoResource,
+  displayFileName,
+  listPhotos,
+  MANAGE_PATH,
+  MAX_PHOTO_BYTES,
+  photoFolder,
+  ROUTE,
+  servePhoto,
+} from '../lib/photos.js'
 import { apply } from '../index.js'
 
 /* Magic bytes only; the route never looks inside the image. */
@@ -210,8 +220,8 @@ test('apply registers the prefix route and serves the $DSH_HOME photo folder', a
     if (previous === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previous
   }
-  assert.equal(registered.length, 1)
-  const [route] = registered
+  assert.equal(registered.length, 2)
+  const route = registered.find((entry) => entry.resource !== undefined)
   assert.equal(route.kind, 'prefix')
   assert.equal(route.path, ROUTE)
 
@@ -219,4 +229,218 @@ test('apply registers the prefix route and serves the $DSH_HOME photo folder', a
   assert.equal(response.status, 200)
   const payload = await response.json()
   assert.deepEqual(payload.photos.map((photo) => photo.name), ['from-home.png'])
+
+  const manage = registered.find((entry) => entry.handler !== undefined)
+  assert.equal(manage.kind, 'exact')
+  assert.equal(manage.path, MANAGE_PATH)
+  assert.equal(typeof manage.handler, 'function')
+  assert.equal(manage.resource, undefined)
+})
+
+/* --- Photo manager write resource ---------------------------------------- */
+
+const ORIGIN = 'http://127.0.0.1:57370'
+
+async function makeWritableDir(t) {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-snap-line-manage-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  return dir
+}
+
+function manageResource(dir, origin = ORIGIN) {
+  return createManageResource(dir, typeof origin === 'function' ? origin : () => origin)
+}
+
+function addRequest(name, body, options = {}) {
+  const headers = {
+    'content-type': options.contentType === undefined ? 'image/png' : options.contentType,
+  }
+  const origin = options.origin === undefined ? ORIGIN : options.origin
+  if (origin !== null) headers.origin = origin
+  if (options.secFetchSite !== undefined) headers['sec-fetch-site'] = options.secFetchSite
+  const url = `${ORIGIN}${MANAGE_PATH}?action=add&name=${encodeURIComponent(name)}`
+  return new Request(url, {
+    method: 'POST',
+    headers,
+    body,
+  })
+}
+
+/** A PNG signature plus an IHDR that declares the requested pixel size. */
+function pngOfSize(width, height) {
+  const header = Buffer.alloc(24)
+  PNG.copy(header, 0)
+  header.writeUInt32BE(13, 8)
+  header.write('IHDR', 12, 'latin1')
+  header.writeUInt32BE(width, 16)
+  header.writeUInt32BE(height, 20)
+  return header
+}
+
+test('manage add stores the original bytes and the manifest lists the photo on the rope', async (t) => {
+  const dir = await makeWritableDir(t)
+  const bytes = Buffer.concat([pngOfSize(2, 2), Buffer.from('original-photo-bytes')])
+  const response = await manageResource(dir)(addRequest('my photo.png', bytes))
+
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8')
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.deepEqual(await response.json(), { ok: true, name: 'my photo.png' })
+  assert.deepEqual(await readFile(join(dir, 'my photo.png')), bytes)
+
+  const manifestResponse = await createPhotoResource(dir)(new Request(`${ORIGIN}${ROUTE}/photos.json`))
+  const manifest = await manifestResponse.json()
+  assert.deepEqual(manifest.photos.map((photo) => photo.name), ['my photo.png'])
+  assert.equal(manifest.photos[0].onRope, true)
+})
+
+test('manage add renames a duplicate instead of overwriting it', async (t) => {
+  const dir = await makeWritableDir(t)
+  const resource = manageResource(dir)
+  const first = Buffer.concat([PNG, Buffer.from('first')])
+  const second = Buffer.concat([PNG, Buffer.from('second')])
+  const third = Buffer.concat([PNG, Buffer.from('third')])
+
+  assert.deepEqual(await (await resource(addRequest('a.png', first))).json(), { ok: true, name: 'a.png' })
+  assert.deepEqual(await (await resource(addRequest('a.png', second))).json(), { ok: true, name: 'a-2.png' })
+  assert.deepEqual(await (await resource(addRequest('a.png', third))).json(), { ok: true, name: 'a-3.png' })
+
+  assert.deepEqual(await readFile(join(dir, 'a.png')), first)
+  assert.deepEqual(await readFile(join(dir, 'a-2.png')), second)
+  assert.deepEqual(await readFile(join(dir, 'a-3.png')), third)
+})
+
+test('manage add refuses a body over 25MB with 413 and writes nothing', async (t) => {
+  const dir = await makeWritableDir(t)
+  const oversized = Buffer.alloc(MAX_PHOTO_BYTES + 1)
+  PNG.copy(oversized, 0)
+
+  const response = await manageResource(dir)(addRequest('big.png', oversized))
+  assert.equal(response.status, 413)
+  assert.equal((await response.json()).error, 'too-large')
+  assert.deepEqual(await readdir(dir), [])
+})
+
+test('manage add refuses a photo over 64MP with 413 and writes nothing', async (t) => {
+  const dir = await makeWritableDir(t)
+  const response = await manageResource(dir)(addRequest('huge.png', pngOfSize(10_000, 10_000)))
+
+  assert.equal(response.status, 413)
+  assert.equal((await response.json()).error, 'too-many-pixels')
+  assert.deepEqual(await readdir(dir), [])
+})
+
+test('manage add refuses unsupported media types with 415', async (t) => {
+  const dir = await makeWritableDir(t)
+  const resource = manageResource(dir)
+
+  const text = await resource(addRequest('notes.txt', Buffer.from('hello'), { contentType: 'text/plain' }))
+  assert.equal(text.status, 415)
+  assert.equal((await text.json()).error, 'unsupported-media-type')
+
+  const mismatched = await resource(addRequest('a.png', PNG, { contentType: 'image/gif' }))
+  assert.equal(mismatched.status, 415)
+  assert.equal((await mismatched.json()).error, 'unsupported-media-type')
+
+  const heic = await resource(addRequest('IMG_0001.HEIC', Buffer.from('heic'), { contentType: 'image/heic' }))
+  assert.equal(heic.status, 415)
+  const heicBody = await heic.json()
+  assert.equal(heicBody.error, 'heic')
+  assert.match(heicBody.message, /HEIC|heic/)
+  assert.deepEqual(await readdir(dir), [])
+})
+
+test('manage add refuses bytes that do not match the image format with 400', async (t) => {
+  const dir = await makeWritableDir(t)
+  const response = await manageResource(dir)(addRequest('fake.png', JPEG))
+
+  assert.equal(response.status, 400)
+  assert.equal((await response.json()).error, 'magic-mismatch')
+  assert.deepEqual(await readdir(dir), [])
+})
+
+test('manage add refuses traversal, hidden, malformed and over-long names with 400', async (t) => {
+  const dir = await makeWritableDir(t)
+  const resource = manageResource(dir)
+  const names = [
+    '../evil.png',
+    '..\\evil.png',
+    'sub/dir.png',
+    '.hidden.png',
+    'bad\u0000.png',
+    `${'x'.repeat(121)}.png`,
+  ]
+  for (const name of names) {
+    const response = await resource(addRequest(name, PNG))
+    assert.equal(response.status, 400, `expected 400 for ${name}`)
+    assert.equal((await response.json()).error, 'invalid-name', `error for ${name}`)
+  }
+  assert.deepEqual(await readdir(dir), [])
+})
+
+test('manage add refuses cross-origin, cross-site and origin-less requests with 403', async (t) => {
+  const dir = await makeWritableDir(t)
+  const resource = manageResource(dir)
+
+  const cases = [
+    addRequest('a.png', PNG, { origin: 'http://evil.example' }),
+    addRequest('b.png', PNG, { origin: null }),
+    addRequest('c.png', PNG, { secFetchSite: 'cross-site' }),
+  ]
+  for (const request of cases) {
+    const response = await resource(request)
+    assert.equal(response.status, 403)
+    assert.equal((await response.json()).error, 'forbidden')
+  }
+  assert.deepEqual(await readdir(dir), [])
+
+  const unbound = createManageResource(dir, () => {
+    throw new Error('webserver: origin read before the listener bound a port')
+  })
+  const response = await unbound(addRequest('d.png', PNG))
+  assert.equal(response.status, 403)
+})
+
+test('manage add leaves no partial file when the write fails', async (t) => {
+  const dir = await makeWritableDir(t)
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    t.skip('running as root: a read-only directory does not refuse writes')
+    return
+  }
+  await chmod(dir, 0o500)
+  try {
+    const response = await manageResource(dir)(addRequest('a.png', PNG))
+    assert.equal(response.status, 500)
+    assert.equal((await response.json()).error, 'write-failed')
+    assert.deepEqual(await readdir(dir), [])
+  } finally {
+    await chmod(dir, 0o700)
+  }
+})
+
+test('manage resource rejects non-POST methods, unknown actions and unknown paths', async (t) => {
+  const dir = await makeWritableDir(t)
+  const resource = manageResource(dir)
+
+  const get = await resource(new Request(`${ORIGIN}${MANAGE_PATH}?action=add&name=a.png`))
+  assert.equal(get.status, 405)
+  assert.equal(get.headers.get('allow'), 'POST')
+
+  const unknownAction = await resource(new Request(`${ORIGIN}${MANAGE_PATH}?action=delete&name=a.png`, {
+    method: 'POST',
+    headers: { origin: ORIGIN, 'content-type': 'application/json' },
+    body: '{}',
+  }))
+  assert.equal(unknownAction.status, 400)
+  assert.equal((await unknownAction.json()).error, 'unknown-action')
+
+  const missingAction = await resource(new Request(`${ORIGIN}${MANAGE_PATH}?name=a.png`, {
+    method: 'POST',
+    headers: { origin: ORIGIN, 'content-type': 'image/png' },
+    body: PNG,
+  }))
+  assert.equal(missingAction.status, 400)
+
+  const elsewhere = await resource(new Request(`${ORIGIN}${ROUTE}/photos.json`, { method: 'POST' }))
+  assert.equal(elsewhere.status, 404)
 })
