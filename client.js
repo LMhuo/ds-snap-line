@@ -273,9 +273,13 @@ window.__ModuleLoader__.load({
     const TILTS = [-2.2, 1.4, -1.1, 2.0, -1.6, 0.9];
     const DELAYS = ['0s', '-1.8s', '-3.2s', '-0.7s', '-2.5s', '-4.1s'];
     const DURATIONS = ['7.6s', '6.8s', '8.2s', '7.1s', '6.5s', '7.8s'];
-    const MAX_PHOTOS = 6;
     const PHOTO_ENDPOINT = '/dsh-snap-line/photos.json';
+    const MANAGE_ENDPOINT = '/dsh-snap-line/manage';
+    const PHOTOS_CHANGED_EVENT = 'dsh-snap-line:photos-changed';
     const POLL_INTERVAL_MS = 5000;
+    const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+    const DISPLAY_MAX_EDGE = 1280;
+    const DISPLAY_JPEG_QUALITY = 0.82;
 
     /** Evenly spread photo centers along the rope, capped at the old five-photo spacing. */
     function photoPositions(count) {
@@ -285,66 +289,986 @@ window.__ModuleLoader__.load({
       return Array.from({ length: count }, (_, index) => Math.round((first + spacing * index) * 100) / 100);
     }
 
-    function samplePhotos(photos, limit) {
-      if (photos.length <= limit) return photos;
-      const picked = [];
-      for (let index = 0; index < limit; index += 1) {
-        picked.push(photos[Math.round((index * (photos.length - 1)) / (limit - 1))]);
-      }
-      return picked;
-    }
-
-    /** Poll the host's photo listing so dropped or removed images show up on their own. */
-    function usePhotoList() {
+    /**
+     * Poll the host's photo listing and refresh at once when the photo manager
+     * dispatches PHOTOS_CHANGED_EVENT after a write; the poll stays as fallback
+     * for photos dropped into the folder by hand.
+     */
+    function useManifest(onRopeOnly) {
       const [photos, setPhotos] = React.useState(null);
       React.useEffect(() => {
         let active = true;
-        let timer;
+        let timer = null;
+        let running = false;
+        let pending = false;
         let lastKey = '';
-        const poll = async () => {
-          if (document.visibilityState === 'hidden') {
-            if (active) timer = setTimeout(poll, POLL_INTERVAL_MS);
-            return;
-          }
+        const load = async () => {
+          if (document.visibilityState === 'hidden') return;
           try {
             const response = await fetch(PHOTO_ENDPOINT, { cache: 'no-store' });
             if (!response.ok) throw new Error('HTTP ' + response.status);
             const data = await response.json();
+            /* The Host decides which photos are on the rope; the Client only renders them. */
             const next = Array.isArray(data.photos)
               ? data.photos
-                  .filter((entry) => entry !== null && typeof entry === 'object' && typeof entry.url === 'string')
-                  .map((entry) => ({ url: entry.url, name: typeof entry.name === 'string' ? entry.name : '' }))
+                  .filter((entry) => entry !== null && typeof entry === 'object'
+                    && (onRopeOnly === false || entry.onRope === true)
+                    && typeof entry.displayUrl === 'string'
+                    && typeof entry.originalUrl === 'string')
+                  .map((entry) => ({
+                    name: typeof entry.name === 'string' ? entry.name : '',
+                    displayUrl: entry.displayUrl,
+                    originalUrl: entry.originalUrl,
+                    onRope: entry.onRope === true,
+                  }))
               : [];
-            const key = next.map((entry) => entry.url).join('|');
+            const key = next
+              .map((entry) => entry.name + '|' + entry.onRope + '|' + entry.displayUrl + '|' + entry.originalUrl)
+              .join('|');
             if (active && key !== lastKey) {
               lastKey = key;
               setPhotos(next);
             }
           } catch {
             if (active) setPhotos((previous) => (previous === null ? [] : previous));
-          } finally {
-            if (active) timer = setTimeout(poll, POLL_INTERVAL_MS);
           }
         };
-        poll();
+        const run = async () => {
+          timer = null;
+          if (running) {
+            pending = true;
+            return;
+          }
+          running = true;
+          await load();
+          running = false;
+          if (!active) return;
+          if (pending) {
+            pending = false;
+            void run();
+          } else {
+            timer = setTimeout(run, POLL_INTERVAL_MS);
+          }
+        };
+        const refresh = () => {
+          if (!active) return;
+          clearTimeout(timer);
+          void run();
+        };
+        void run();
+        window.addEventListener(PHOTOS_CHANGED_EVENT, refresh);
         return () => {
           active = false;
           clearTimeout(timer);
+          window.removeEventListener(PHOTOS_CHANGED_EVENT, refresh);
         };
-      }, []);
+      }, [onRopeOnly]);
       return photos;
     }
 
-    function userPhotoImage(url) {
+    function usePhotoList() {
+      return useManifest(true);
+    }
+
+    /* --- Photo manager --------------------------------------------------- */
+
+    const MANAGER_NAMESPACE = 'snapLineManager';
+    const MANAGER_DICTIONARY = {
+      zh: {
+        title: '照片',
+        summary: '共 {total} 张，{onRope} 张在绳上',
+        loading: '正在读取照片…',
+        empty: '照片目录还是空的；添加照片后就会替换内置插画。',
+        add: '添加照片',
+        uploading: '正在添加…',
+        dropZone: '添加照片区域',
+        dropHint: '把照片拖到这里，或选择文件；支持 JPG、PNG、WebP、GIF、AVIF，单张不超过 25MB。',
+        photoList: '照片列表',
+        photoItem: '照片 {position}：{name}',
+        reorderHint: '拖动缩略图，或用每一张的上移/下移按钮调整顺序；排在前六张的照片在绳上。',
+        moveUp: '上移',
+        moveDown: '下移',
+        moveUpPhoto: '上移照片 {position}：{name}',
+        moveDownPhoto: '下移照片 {position}：{name}',
+        reordering: '正在保存顺序…',
+        orderSaved: '顺序已更新。',
+        errorOrder: '顺序保存失败，请稍后重试。',
+        errorOrderForbidden: '顺序保存被拒绝，请刷新页面后重试。',
+        errorOrderInvalid: '顺序请求无效，请刷新页面后重试。',
+        onRope: '在绳上',
+        offRope: '未上绳',
+        added: '已添加 {count} 张照片。',
+        delete: '删除',
+        deletePhoto: '删除照片：{name}',
+        deletePrompt: '确定删除？',
+        deleteConfirm: '删除确认：{name}',
+        confirmDelete: '确认删除',
+        confirmDeletePhoto: '确认删除照片：{name}',
+        cancelDelete: '取消',
+        cancelDeletePhoto: '取消删除照片：{name}',
+        deleting: '正在删除…',
+        deleted: '已删除 {name}。',
+        errorDeleteMissing: '{name}：照片已不存在，未删除。',
+        errorDeleteFailed: '{name}：删除失败，请稍后重试。',
+        errorInvalidName: '{name}：文件名不能包含路径分隔符、以点开头或过长，未添加。',
+        errorUnsupported: '{name}：不支持的图片格式，未添加。',
+        errorHeic: '{name}：暂不支持 HEIC，请先转换为 JPG 或 PNG。',
+        errorTooLarge: '{name}：超过单张 25MB 或 6400 万像素，未添加。',
+        errorInvalidImage: '{name}：文件内容与图片格式不符，未添加。',
+        errorForbidden: '{name}：请求被拒绝，请刷新页面后重试。',
+        errorUnexpected: '{name}：添加失败，请稍后重试。',
+      },
+      en: {
+        title: 'Photos',
+        summary: '{total} photos · {onRope} on the rope',
+        loading: 'Reading photos…',
+        empty: 'The photo folder is still empty; add photos to replace the built-in illustrations.',
+        add: 'Add photos',
+        uploading: 'Adding…',
+        dropZone: 'Add photos area',
+        dropHint: 'Drop photos here or choose files; JPG, PNG, WebP, GIF and AVIF, up to 25MB each.',
+        photoList: 'Photo list',
+        photoItem: 'Photo {position}: {name}',
+        reorderHint: 'Drag thumbnails, or use each photo\'s Move up / Move down buttons; the first six photos hang on the rope.',
+        moveUp: 'Move up',
+        moveDown: 'Move down',
+        moveUpPhoto: 'Move photo {position} up: {name}',
+        moveDownPhoto: 'Move photo {position} down: {name}',
+        reordering: 'Saving the order…',
+        orderSaved: 'Order updated.',
+        errorOrder: 'Could not save the order; try again later.',
+        errorOrderForbidden: 'The order write was refused; refresh the page and try again.',
+        errorOrderInvalid: 'The order request was invalid; refresh the page and try again.',
+        onRope: 'On the rope',
+        offRope: 'Off the rope',
+        added: 'Added {count} photos.',
+        delete: 'Delete',
+        deletePhoto: 'Delete photo: {name}',
+        deletePrompt: 'Delete this photo?',
+        deleteConfirm: 'Delete confirmation: {name}',
+        confirmDelete: 'Confirm delete',
+        confirmDeletePhoto: 'Confirm deleting photo: {name}',
+        cancelDelete: 'Cancel',
+        cancelDeletePhoto: 'Cancel deleting photo: {name}',
+        deleting: 'Deleting…',
+        deleted: 'Deleted {name}.',
+        errorDeleteMissing: '{name}: the photo is already gone; nothing was deleted.',
+        errorDeleteFailed: '{name}: could not delete the photo; try again later.',
+        errorInvalidName: '{name}: the file name cannot contain path separators, start with a dot, or be too long; not added.',
+        errorUnsupported: '{name}: unsupported image type; not added.',
+        errorHeic: '{name}: HEIC is not supported yet; convert it to JPG or PNG first.',
+        errorTooLarge: '{name}: larger than 25MB or 64 megapixels; not added.',
+        errorInvalidImage: '{name}: the file contents do not match an image; not added.',
+        errorForbidden: '{name}: the request was refused; refresh the page and try again.',
+        errorUnexpected: '{name}: could not add the photo; try again later.',
+      },
+    };
+
+    const MANAGER_CSS = `
+      .sl-manager {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: inherit;
+      }
+      .sl-manager-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .sl-manager-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .sl-manager-summary {
+        opacity: 0.7;
+      }
+      .sl-manager-drop {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 12px 14px;
+        border: 1px dashed rgba(128, 128, 128, 0.55);
+        border-radius: 8px;
+        transition: background-color 120ms ease, border-color 120ms ease;
+      }
+      .sl-manager-drop[data-dragging="true"] {
+        border-color: rgba(128, 128, 128, 0.95);
+        background: rgba(128, 128, 128, 0.12);
+      }
+      .sl-manager-hint {
+        margin: 0;
+        opacity: 0.78;
+        flex: 1 1 220px;
+      }
+      .sl-manager-reorder-hint {
+        margin: 0;
+        opacity: 0.78;
+      }
+      .sl-manager-button {
+        padding: 6px 12px;
+        border: 1px solid rgba(128, 128, 128, 0.5);
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .sl-manager-button:hover:not(:disabled) {
+        background: rgba(128, 128, 128, 0.12);
+      }
+      .sl-manager-button:focus-visible {
+        outline: 2px solid rgba(128, 128, 128, 0.9);
+        outline-offset: 2px;
+      }
+      .sl-manager-button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .sl-manager-input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+      .sl-manager-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+        gap: 12px;
+      }
+      .sl-manager-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+      .sl-manager-item[draggable="true"] {
+        cursor: grab;
+      }
+      .sl-manager-item-dragging {
+        opacity: 0.55;
+      }
+      .sl-manager-item-over {
+        outline: 2px dashed rgba(128, 128, 128, 0.9);
+        outline-offset: 3px;
+        border-radius: 8px;
+      }
+      .sl-manager-move {
+        flex: 1 1 0;
+        padding: 1px 0;
+        border: 1px solid rgba(128, 128, 128, 0.5);
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        line-height: 1.4;
+        cursor: pointer;
+      }
+      .sl-manager-move:hover:not(:disabled) {
+        background: rgba(128, 128, 128, 0.12);
+      }
+      .sl-manager-move:focus-visible {
+        outline: 2px solid rgba(128, 128, 128, 0.9);
+        outline-offset: 2px;
+      }
+      .sl-manager-move:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .sl-manager-error {
+        margin: 0;
+        color: #c0392b;
+      }
+      .sl-manager-thumb {
+        display: block;
+        width: 100%;
+        aspect-ratio: 4 / 3;
+        object-fit: cover;
+        border-radius: 6px;
+        background: rgba(128, 128, 128, 0.12);
+      }
+      .sl-manager-name {
+        overflow-wrap: anywhere;
+      }
+      .sl-manager-badge {
+        align-self: flex-start;
+        padding: 1px 6px;
+        border-radius: 999px;
+        font-size: 11px;
+        background: rgba(128, 128, 128, 0.18);
+      }
+      .sl-manager-badge-off {
+        opacity: 0.6;
+      }
+      .sl-manager-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-top: 2px;
+      }
+      .sl-manager-confirm-text {
+        font-size: 12px;
+        opacity: 0.85;
+      }
+      .sl-manager-delete {
+        color: #c0392b;
+        border-color: rgba(192, 57, 43, 0.45);
+      }
+      .sl-manager-delete:hover:not(:disabled) {
+        background: rgba(192, 57, 43, 0.12);
+      }
+      .sl-manager-delete:focus-visible {
+        outline: 2px solid rgba(192, 57, 43, 0.8);
+        outline-offset: 2px;
+      }
+      .sl-manager-errors {
+        margin: 0;
+        padding-left: 18px;
+        color: #c0392b;
+      }
+      .sl-manager-notice {
+        margin: 0;
+        opacity: 0.8;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .sl-manager-drop {
+          transition: none;
+        }
+      }
+    `;
+
+    const UPLOAD_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif']);
+    const HEIC_EXTENSIONS = new Set(['heic', 'heif']);
+    const MEDIA_TYPES_BY_EXTENSION = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      avif: 'image/avif',
+    };
+    /*
+     * One place mapping Host error codes to dictionary keys. Each operation
+     * falls back to its own generic message.
+     */
+    const ERROR_KEYS_BY_OPERATION = {
+      add: {
+        'invalid-name': 'errorInvalidName',
+        'unsupported-media-type': 'errorUnsupported',
+        heic: 'errorHeic',
+        'too-large': 'errorTooLarge',
+        'too-many-pixels': 'errorTooLarge',
+        'magic-mismatch': 'errorInvalidImage',
+        'invalid-image': 'errorInvalidImage',
+        forbidden: 'errorForbidden',
+        'unknown-action': 'errorUnexpected',
+        'method-not-allowed': 'errorUnexpected',
+        fallback: 'errorUnexpected',
+      },
+      order: {
+        forbidden: 'errorOrderForbidden',
+        'invalid-order': 'errorOrderInvalid',
+        'invalid-name': 'errorOrderInvalid',
+        'too-large': 'errorOrderInvalid',
+        'unsupported-media-type': 'errorOrderInvalid',
+        fallback: 'errorOrder',
+      },
+      delete: {
+        'not-found': 'errorDeleteMissing',
+        forbidden: 'errorForbidden',
+        fallback: 'errorDeleteFailed',
+      },
+    };
+
+    function errorKey(operation, code) {
+      const keys = ERROR_KEYS_BY_OPERATION[operation];
+      if (typeof code === 'string' && code !== 'fallback'
+        && Object.prototype.hasOwnProperty.call(keys, code)) {
+        return keys[code];
+      }
+      return keys.fallback;
+    }
+
+    function fileNameExtension(name) {
+      const dot = name.lastIndexOf('.');
+      return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
+    }
+
+    async function uploadPhoto(file, t) {
+      const extension = fileNameExtension(file.name);
+      if (HEIC_EXTENSIONS.has(extension)) return { error: t('errorHeic', { name: file.name }) };
+      if (!UPLOAD_EXTENSIONS.has(extension)) return { error: t('errorUnsupported', { name: file.name }) };
+      if (file.size > MAX_UPLOAD_BYTES) return { error: t('errorTooLarge', { name: file.name }) };
+      const contentType = typeof file.type === 'string' && file.type.length > 0
+        ? file.type
+        : MEDIA_TYPES_BY_EXTENSION[extension];
+      let payload = null;
+      try {
+        const response = await fetch(
+          MANAGE_ENDPOINT + '?action=add&name=' + encodeURIComponent(file.name),
+          {
+            method: 'POST',
+            headers: { 'content-type': contentType },
+            body: file,
+          },
+        );
+        payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const code = payload !== null && typeof payload.error === 'string' ? payload.error : '';
+          return { error: t(errorKey('add', code), { name: file.name }) };
+        }
+      } catch {
+        return { error: t('errorUnexpected', { name: file.name }) };
+      }
+      return { name: payload !== null && typeof payload.name === 'string' ? payload.name : file.name };
+    }
+
+    /** Write the full name array; the Host normalizes it and the manifest follows. */
+    async function saveOrder(names, t) {
+      try {
+        const response = await fetch(MANAGE_ENDPOINT + '?action=order', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ names }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const code = payload !== null && typeof payload.error === 'string' ? payload.error : '';
+          return { error: t(errorKey('order', code)) };
+        }
+      } catch {
+        return { error: t(errorKey('order', '')) };
+      }
+      return { ok: true };
+    }
+
+    /* --- Display copies --------------------------------------------------
+     * The rope and the list load a small JPEG; the lightbox keeps the original.
+     * Everything here is best-effort: a browser that cannot decode or encode a
+     * photo leaves the manifest's original-image fallback in place.
+     */
+
+    function loadImageElement(url) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.decoding = 'async';
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('dsh-snap-line: image decode failed'));
+        image.src = url;
+      });
+    }
+
+    function canvasJpeg(canvas) {
+      return new Promise((resolve) => {
+        try {
+          canvas.toBlob(
+            (blob) => resolve(blob !== null && blob.type === 'image/jpeg' ? blob : null),
+            'image/jpeg',
+            DISPLAY_JPEG_QUALITY,
+          );
+        } catch {
+          resolve(null);
+        }
+      });
+    }
+
+    /**
+     * Downsample one photo to a JPEG display copy: longest edge at most 1280px,
+     * quality 0.82, EXIF orientation applied. Animated GIF/AVIF decode to their
+     * first frame; the original file is never modified. Returns null when the
+     * browser cannot produce a copy.
+     */
+    async function createDisplayCopy(source) {
+      let bitmap = null;
+      let objectUrl = null;
+      try {
+        if (typeof createImageBitmap === 'function') {
+          try {
+            bitmap = await createImageBitmap(source, { imageOrientation: 'from-image' });
+          } catch {
+            bitmap = null;
+          }
+        }
+        let image = null;
+        if (bitmap === null) {
+          objectUrl = URL.createObjectURL(source);
+          image = await loadImageElement(objectUrl);
+        }
+        const sourceWidth = bitmap !== null ? bitmap.width : image.naturalWidth;
+        const sourceHeight = bitmap !== null ? bitmap.height : image.naturalHeight;
+        if (!(sourceWidth > 0) || !(sourceHeight > 0)) return null;
+        const scale = Math.min(1, DISPLAY_MAX_EDGE / Math.max(sourceWidth, sourceHeight));
+        const width = Math.max(1, Math.round(sourceWidth * scale));
+        const height = Math.max(1, Math.round(sourceHeight * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (context === null) return null;
+        /* JPEG has no alpha: paint the frame white instead of letting it go black. */
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, width, height);
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
+        context.drawImage(bitmap !== null ? bitmap : image, 0, 0, width, height);
+        return await canvasJpeg(canvas);
+      } finally {
+        if (bitmap !== null && typeof bitmap.close === 'function') bitmap.close();
+        if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
+      }
+    }
+
+    async function uploadDisplayCopy(name, blob) {
+      const response = await fetch(
+        MANAGE_ENDPOINT + '?action=display&name=' + encodeURIComponent(name),
+        {
+          method: 'POST',
+          headers: { 'content-type': 'image/jpeg' },
+          body: blob,
+        },
+      );
+      return response.ok;
+    }
+
+    /** Generate and store one display copy; false means the original fallback stays. */
+    async function storeDisplayCopy(name, source) {
+      try {
+        const blob = await createDisplayCopy(source);
+        if (blob === null) return false;
+        return await uploadDisplayCopy(name, blob);
+      } catch {
+        return false;
+      }
+    }
+
+    function PhotoManager(props) {
+      const { t } = props;
+      const photos = useManifest(false);
+      const [errors, setErrors] = React.useState([]);
+      const [notice, setNotice] = React.useState('');
+      const [busy, setBusy] = React.useState(false);
+      const [dragging, setDragging] = React.useState(false);
+      const [ordering, setOrdering] = React.useState(false);
+      const [orderError, setOrderError] = React.useState('');
+      const [dragIndex, setDragIndex] = React.useState(null);
+      const [dropIndex, setDropIndex] = React.useState(null);
+      const [confirming, setConfirming] = React.useState('');
+      const [deleting, setDeleting] = React.useState('');
+      const inputRef = React.useRef(null);
+      /* Generated at most once per photo per manager open; a later open retries. */
+      const attemptedDisplays = React.useRef(new Set());
+      const busyDisplays = React.useRef(new Set());
+      const deleteButtonRefs = React.useRef({});
+      const confirmButtonRef = React.useRef(null);
+      const restoreFocusTo = React.useRef('');
+
+      /**
+       * Run one display-copy job per photo at a time. Returns undefined when the
+       * photo is already busy, so the caller can leave the original fallback in
+       * place and try again on a later open.
+       */
+      const runDisplayTask = async (name, task) => {
+        if (busyDisplays.current.has(name)) return undefined;
+        busyDisplays.current.add(name);
+        try {
+          return await task();
+        } finally {
+          busyDisplays.current.delete(name);
+        }
+      };
+
+      /*
+       * Backfill display copies for photos that predate the photo manager or
+       * were dropped into the folder by hand. Skip photos that already have
+       * one, and treat every failure as non-fatal: the original still shows.
+       */
+      React.useEffect(() => {
+        if (photos === null) return;
+        const pending = photos.filter((photo) => photo.name !== ''
+          && photo.displayUrl === photo.originalUrl
+          && !attemptedDisplays.current.has(photo.name));
+        if (pending.length === 0) return;
+        let cancelled = false;
+        void (async () => {
+          let uploaded = false;
+          for (const photo of pending) {
+            if (cancelled) return;
+            /* Marked here, not up front, so a React StrictMode re-run still works. */
+            if (attemptedDisplays.current.has(photo.name)) continue;
+            attemptedDisplays.current.add(photo.name);
+            const stored = await runDisplayTask(photo.name, async () => {
+              let source = null;
+              try {
+                const response = await fetch(photo.originalUrl);
+                if (response.ok) source = await response.blob();
+              } catch {
+                source = null;
+              }
+              return source !== null && await storeDisplayCopy(photo.name, source);
+            });
+            if (stored === true) uploaded = true;
+          }
+          if (!cancelled && uploaded) window.dispatchEvent(new Event(PHOTOS_CHANGED_EVENT));
+        })();
+        return () => {
+          cancelled = true;
+        };
+      }, [photos]);
+
+      /* Move focus into the confirm step, and back to the delete control when it closes. */
+      React.useEffect(() => {
+        if (confirming !== '') {
+          if (confirmButtonRef.current !== null) confirmButtonRef.current.focus();
+          return;
+        }
+        const name = restoreFocusTo.current;
+        if (name === '') return;
+        restoreFocusTo.current = '';
+        const button = deleteButtonRefs.current[name];
+        if (button !== undefined && button !== null) button.focus();
+      }, [confirming]);
+
+      const addFiles = async (fileList) => {
+        const files = Array.from(fileList || []);
+        if (files.length === 0) return;
+        setBusy(true);
+        setErrors([]);
+        setOrderError('');
+        setNotice('');
+        const failures = [];
+        let added = 0;
+        for (const file of files) {
+          const result = await uploadPhoto(file, t);
+          if (result.error !== undefined) {
+            failures.push(result.error);
+            continue;
+          }
+          added += 1;
+          /* The original is already listed if this best-effort copy fails. */
+          await runDisplayTask(result.name, () => storeDisplayCopy(result.name, file));
+        }
+        setBusy(false);
+        setErrors(failures);
+        if (added > 0) {
+          setNotice(t('added', { count: added }));
+          window.dispatchEvent(new Event(PHOTOS_CHANGED_EVENT));
+        }
+      };
+
+      const removePhoto = async (name) => {
+        setDeleting(name);
+        setErrors([]);
+        setOrderError('');
+        setNotice('');
+        let failed = false;
+        try {
+          const response = await fetch(MANAGE_ENDPOINT + '?action=delete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name }),
+          });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            failed = true;
+            const code = payload !== null && typeof payload.error === 'string' ? payload.error : '';
+            setErrors([t(errorKey('delete', code), { name })]);
+            return;
+          }
+          setNotice(t('deleted', { name }));
+          window.dispatchEvent(new Event(PHOTOS_CHANGED_EVENT));
+        } catch {
+          failed = true;
+          setErrors([t(errorKey('delete', ''), { name })]);
+        } finally {
+          setDeleting('');
+          setConfirming('');
+          if (failed) restoreFocusTo.current = name;
+        }
+      };
+
+      const cancelDelete = (name) => {
+        restoreFocusTo.current = name;
+        setConfirming('');
+      };
+
+      const onDrop = (event) => {
+        event.preventDefault();
+        setDragging(false);
+        void addFiles(event.dataTransfer === null ? null : event.dataTransfer.files);
+      };
+      const onDragOver = (event) => {
+        event.preventDefault();
+        if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'copy';
+        setDragging(true);
+      };
+
+      const persistOrder = async (ordered) => {
+        setOrdering(true);
+        setOrderError('');
+        setNotice(t('reordering'));
+        const result = await saveOrder(ordered.map((photo) => photo.name), t);
+        setOrdering(false);
+        if (result.error !== undefined) {
+          setNotice('');
+          setOrderError(result.error);
+          return;
+        }
+        setNotice(t('orderSaved'));
+        window.dispatchEvent(new Event(PHOTOS_CHANGED_EVENT));
+      };
+
+      /** Splice the dragged photo to the drop position, then persist the whole order. */
+      const movePhoto = (from, to) => {
+        if (photos === null || busy || ordering || deleting !== '') return;
+        if (from === to || from < 0 || to < 0 || from >= photos.length || to >= photos.length) return;
+        const next = photos.slice();
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        void persistOrder(next);
+      };
+
+      const startDrag = (event, index) => {
+        if (busy || ordering || deleting !== '') {
+          event.preventDefault();
+          return;
+        }
+        setDragIndex(index);
+        setDropIndex(index);
+        if (event.dataTransfer !== null) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', photos === null ? '' : photos[index].name);
+        }
+      };
+      const dragOverItem = (event, index) => {
+        if (dragIndex === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'move';
+        setDropIndex(index);
+      };
+      const dropOnItem = (event, index) => {
+        if (dragIndex === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const from = dragIndex;
+        setDragIndex(null);
+        setDropIndex(null);
+        movePhoto(from, index);
+      };
+      const endDrag = () => {
+        setDragIndex(null);
+        setDropIndex(null);
+      };
+
+      const total = photos === null ? 0 : photos.length;
+      const onRope = photos === null ? 0 : photos.filter((photo) => photo.onRope).length;
+      const locked = busy || ordering || deleting !== '';
+      return h('section', { className: 'sl-manager', 'aria-label': t('title') },
+        h('style', { key: 'css' }, MANAGER_CSS),
+        h('div', { className: 'sl-manager-header' },
+          h('h3', { className: 'sl-manager-title' }, t('title')),
+          photos === null ? null : h('span', { className: 'sl-manager-summary' }, t('summary', { total, onRope })),
+        ),
+        h('div', {
+          className: 'sl-manager-drop',
+          'data-dragging': dragging ? 'true' : 'false',
+          role: 'group',
+          'aria-label': t('dropZone'),
+          onDragOver,
+          onDragLeave: () => setDragging(false),
+          onDrop,
+        },
+          h('span', { className: 'sl-manager-hint' }, t('dropHint')),
+          h('button', {
+            type: 'button',
+            className: 'sl-manager-button',
+            disabled: locked,
+            'aria-busy': busy ? 'true' : 'false',
+            onClick: () => {
+              if (inputRef.current !== null) inputRef.current.click();
+            },
+          }, busy ? t('uploading') : t('add')),
+          h('input', {
+            ref: inputRef,
+            type: 'file',
+            className: 'sl-manager-input',
+            accept: 'image/jpeg,image/png,image/webp,image/gif,image/avif',
+            multiple: true,
+            tabIndex: -1,
+            disabled: locked,
+            'aria-hidden': 'true',
+            onChange: (event) => {
+              const files = event.target.files;
+              event.target.value = '';
+              void addFiles(files);
+            },
+          }),
+        ),
+        errors.length === 0 ? null : h('ul', { className: 'sl-manager-errors', role: 'alert' },
+          errors.map((message, index) => h('li', { key: index }, message))),
+        orderError === '' ? null : h('p', { className: 'sl-manager-error', role: 'alert' }, orderError),
+        notice === '' ? null : h('p', { className: 'sl-manager-notice', role: 'status', 'aria-live': 'polite' }, notice),
+        photos !== null && photos.length > 1
+          ? h('p', { className: 'sl-manager-reorder-hint' }, t('reorderHint'))
+          : null,
+        photos === null
+          ? h('p', { className: 'sl-manager-hint' }, t('loading'))
+          : photos.length === 0
+            ? h('p', { className: 'sl-manager-hint' }, t('empty'))
+            : h('ul', {
+                className: 'sl-manager-list',
+                'aria-label': t('photoList'),
+                'aria-busy': ordering ? 'true' : 'false',
+              },
+                photos.map((photo, index) => {
+                  const isDeleting = deleting === photo.name;
+                  return h('li', {
+                    key: photo.name,
+                    className: 'sl-manager-item'
+                      + (dragIndex === index ? ' sl-manager-item-dragging' : '')
+                      + (dropIndex === index && dragIndex !== null ? ' sl-manager-item-over' : ''),
+                    'aria-label': t('photoItem', { position: index + 1, name: photo.name }),
+                    draggable: !locked,
+                    onDragStart: (event) => startDrag(event, index),
+                    onDragOver: (event) => dragOverItem(event, index),
+                    onDrop: (event) => dropOnItem(event, index),
+                    onDragEnd: endDrag,
+                  },
+                    h(PhotoThumb, {
+                      displayUrl: photo.displayUrl,
+                      originalUrl: photo.originalUrl,
+                    }),
+                    h('span', { className: 'sl-manager-name' }, photo.name),
+                    h('span', {
+                      className: photo.onRope
+                        ? 'sl-manager-badge'
+                        : 'sl-manager-badge sl-manager-badge-off',
+                    }, photo.onRope ? t('onRope') : t('offRope')),
+                    confirming === photo.name
+                      ? h('div', {
+                          className: 'sl-manager-actions',
+                          role: 'group',
+                          'aria-label': t('deleteConfirm', { name: photo.name }),
+                          onKeyDown: (event) => {
+                            if (event.key !== 'Escape') return;
+                            event.preventDefault();
+                            cancelDelete(photo.name);
+                          },
+                        },
+                          h('span', { className: 'sl-manager-confirm-text' }, t('deletePrompt')),
+                          h('button', {
+                            ref: confirmButtonRef,
+                            type: 'button',
+                            className: 'sl-manager-button sl-manager-delete',
+                            'aria-label': t('confirmDeletePhoto', { name: photo.name }),
+                            disabled: isDeleting,
+                            'aria-busy': isDeleting ? 'true' : 'false',
+                            onClick: () => {
+                              void removePhoto(photo.name);
+                            },
+                          }, isDeleting ? t('deleting') : t('confirmDelete')),
+                          h('button', {
+                            type: 'button',
+                            className: 'sl-manager-button',
+                            'aria-label': t('cancelDeletePhoto', { name: photo.name }),
+                            disabled: isDeleting,
+                            onClick: () => cancelDelete(photo.name),
+                          }, t('cancelDelete')),
+                        )
+                      : h('div', { className: 'sl-manager-actions' },
+                          h('button', {
+                            ref: (element) => {
+                              deleteButtonRefs.current[photo.name] = element;
+                            },
+                            type: 'button',
+                            className: 'sl-manager-button sl-manager-delete',
+                            'aria-label': t('deletePhoto', { name: photo.name }),
+                            disabled: locked,
+                            onClick: () => {
+                              setErrors([]);
+                              setOrderError('');
+                              setNotice('');
+                              setConfirming(photo.name);
+                            },
+                          }, t('delete')),
+                        ),
+                    h('div', { className: 'sl-manager-actions' },
+                      h('button', {
+                        type: 'button',
+                        className: 'sl-manager-move',
+                        disabled: locked || index === 0,
+                        'aria-label': t('moveUpPhoto', { position: index + 1, name: photo.name }),
+                        title: t('moveUp'),
+                        onClick: () => movePhoto(index, index - 1),
+                      }, '↑'),
+                      h('button', {
+                        type: 'button',
+                        className: 'sl-manager-move',
+                        disabled: locked || index === photos.length - 1,
+                        'aria-label': t('moveDownPhoto', { position: index + 1, name: photo.name }),
+                        title: t('moveDown'),
+                        onClick: () => movePhoto(index, index + 1),
+                      }, '↓'),
+                    ),
+                  );
+                })),
+      );
+    }
+
+    /** Display copy with a per-photo fallback to the original when decoding fails. */
+    function usePhotoSource(displayUrl, originalUrl) {
+      const [source, setSource] = React.useState(displayUrl);
+      React.useEffect(() => {
+        setSource(displayUrl);
+      }, [displayUrl]);
+      const onError = () => {
+        if (source !== originalUrl) setSource(originalUrl);
+      };
+      return [source, onError];
+    }
+
+    function PhotoThumb(props) {
+      const [source, onError] = usePhotoSource(props.displayUrl, props.originalUrl);
+      return h('img', {
+        className: 'sl-manager-thumb',
+        src: source,
+        alt: '',
+        draggable: 'false',
+        onError,
+      });
+    }
+
+    function PhotoImage(props) {
+      const [source, onError] = usePhotoSource(props.displayUrl, props.originalUrl);
+      return h('image', {
+        href: source,
+        x: -26,
+        y: 11,
+        width: 52,
+        height: 52,
+        preserveAspectRatio: 'xMidYMid slice',
+        onError,
+      });
+    }
+
+    function userPhotoImage(displayUrl, originalUrl) {
       return h('g', { clipPath: 'url(#slClip)' },
-        h('image', {
-          href: url,
-          x: -26,
-          y: 11,
-          width: 52,
-          height: 52,
-          preserveAspectRatio: 'xMidYMid slice',
-        }),
+        h(PhotoImage, { displayUrl, originalUrl }),
       );
     }
 
@@ -469,7 +1393,12 @@ window.__ModuleLoader__.load({
       }, [preview]);
       const usingOwnPhotos = Array.isArray(photos) && photos.length > 0;
       const items = usingOwnPhotos
-        ? samplePhotos(photos, MAX_PHOTOS).map((photo) => ({ kind: 'photo', url: photo.url, name: photo.name }))
+        ? photos.map((photo) => ({
+            kind: 'photo',
+            displayUrl: photo.displayUrl,
+            originalUrl: photo.originalUrl,
+            name: photo.name,
+          }))
         : ILLUSTRATIONS.map((scene) => ({ kind: 'illustration', scene }));
       const xs = photoPositions(items.length);
       return h('div', {
@@ -507,9 +1436,9 @@ window.__ModuleLoader__.load({
           h('circle', { cx: 18, cy: 14, r: 2.6, fill: '#8a7a63' }),
           h('circle', { cx: 682, cy: 14, r: 2.6, fill: '#8a7a63' }),
           items.map((item, index) => {
-            const content = item.kind === 'photo' ? userPhotoImage(item.url) : item.scene();
+            const content = item.kind === 'photo' ? userPhotoImage(item.displayUrl, item.originalUrl) : item.scene();
             return h(Photo, {
-              key: item.kind === 'photo' ? 'photo-' + item.url : 'illustration-' + index,
+              key: item.kind === 'photo' ? 'photo-' + item.name : 'illustration-' + index,
               x: xs[index],
               tilt: TILTS[index % TILTS.length],
               delay: DELAYS[index % DELAYS.length],
@@ -520,7 +1449,7 @@ window.__ModuleLoader__.load({
                 : '内置插画 ' + (index + 1) + ' / Built-in illustration ' + (index + 1),
               onOpen: () => setPreview(
                 item.kind === 'photo'
-                  ? { kind: 'photo', url: item.url, name: item.name }
+                  ? { kind: 'photo', url: item.originalUrl, name: item.name }
                   : { kind: 'illustration', content },
               ),
             });
@@ -604,8 +1533,17 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots'],
+      inject: ['slots', 'locale'],
       apply(ctx) {
+        ctx.effect(
+          () => ctx.locale.register(MANAGER_NAMESPACE, MANAGER_DICTIONARY),
+          'dsh-snap-line: photo manager copy',
+        );
+        ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+          name: 'plugins.bundle.config',
+          key: 'dsh-snap-line',
+          locale: MANAGER_NAMESPACE,
+        }, PhotoManager));
         ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
           name: 'conversation.composer.dock',
           id: 'dsh-snap-line',
