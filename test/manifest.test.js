@@ -99,7 +99,8 @@ test('icon is a small standalone SVG', async () => {
 test('photos folder keeps a tracked placeholder', async () => {
   const note = await read('photos/README.md')
   assert.match(note, /照片/)
-  assert.match(note, /\.jpg/)
+  assert.match(note, /不再读取/)
+  assert.match(note, /dsh-snap-line\/photos/)
 })
 
 test('package metadata points at the public GitHub repository', async () => {

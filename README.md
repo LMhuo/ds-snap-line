@@ -10,7 +10,7 @@
 [![npm](https://img.shields.io/npm/v/dsh-snap-line?logo=npm)](https://www.npmjs.com/package/dsh-snap-line)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-4d6bfe)](https://github.com/deepseek-ai)
 
-SnapLine 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的界面插件（bundle）。它在聊天输入框下方画一条微微下垂的晾衣绳，夹上一排拍立得照片，照片随风轻轻摆动。默认是五张手绘小画；把照片放进 `photos/` 文件夹，就会换成你自己的照片，几秒内自动刷新，无需重启。
+SnapLine 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的界面插件（bundle）。它在聊天输入框下方画一条微微下垂的晾衣绳，夹上一排拍立得照片，照片随风轻轻摆动。默认是五张手绘小画；在已安装插件的详情页里加几张自己的照片，就会换成你自己的照片，几秒内自动刷新，无需重启。
 
 ![SnapLine 预览](docs/images/preview.png)
 
@@ -31,9 +31,10 @@ SnapLine 是 [DeepSeek Harness](https://github.com/deepseek-ai) 的界面插件�
 ## 特性
 
 - **两个位置都会出现**：既挂在会话页的 `conversation.composer.dock` 插槽里（紧贴输入框下方、不遮挡操作），也出现在新会话首页的空白 Hero 里；
-- **自带五张手绘插画**：`photos/` 为空时使用内置插画，不会出现空荡荡的绳子；
-- **换成自己的照片**：支持 `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`，按文件名自然排序，增删后 5 秒内自动刷新；
-- **排版自适应**：最多显示 6 张，超过时均匀抽样；照片越多排得越密，每张有自己的倾斜角度与摆动节奏；
+- **自带五张手绘插画**：照片目录为空时使用内置插画，不会出现空荡荡的绳子；
+- **在插件详情页管理自己的照片**：多选添加、删除、拖动排序，前 6 张上绳；支持 `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`；
+- **排版自适应**：最多显示 6 张；照片越多排得越密，每张有自己的倾斜角度与摆动节奏；
+- **原图与显示版分离**：晾衣绳和列表缩略图加载几百 KB 的显示版，点开灯箱才加载原图；
 - **交互克制**：悬停只靠 CSS `:hover` 与 `transform` 让照片轻轻晃一下再回正，点击打开灯箱预览，没有鼠标监听、没有多余重渲染；
 - **键盘友好**：照片可以用 Tab 聚焦，Enter / 空格打开灯箱；灯箱打开后 Tab 被约束在关闭按钮上，Esc、点击背景或关闭按钮都能退出，关闭后焦点回到打开它的照片；
 - **读屏器可读**：晾衣绳、每张照片、灯箱与关闭按钮都有中英双语的无障碍名称；
@@ -91,34 +92,35 @@ git clone https://github.com/LMhuo/dsh-snap-line.git
 
 ## 使用自己的照片
 
-照片目录是**插件包目录下的 `photos/`**：
+照片在**已安装插件的详情页**里管理：侧栏 **Plugins → Installed plugins → dsh-snap-line**，详情页里的照片管理器可以多选添加、删除、拖动排序。排序决定哪 6 张上绳：**前 6 张挂在绳上**，其余照片留在列表里。
 
-| 安装方式 | 照片目录 |
-| --- | --- |
-| 本地目录 / `link:` 安装 | 本仓库的 `photos/` |
-| npm / GitHub 安装 | `~/.dsh/profiles/<profile>/node_modules/dsh-snap-line/photos/` |
+- 照片存放在 `$DSH_HOME/dsh-snap-line/photos/`（默认 `~/.dsh/dsh-snap-line/photos/`），不在插件包内，升级插件不会丢照片；
+- 支持 `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`；单张 ≤ 25MB、像素 ≤ 64MP；iPhone 的 HEIC 需要先在相册里导出成 JPEG；
+- 晾衣绳和列表缩略图加载的是**显示版**（长边 1280 的 JPEG，通常几百 KB），点开灯箱加载**原图**；
+- 顺序保存在照片目录的 `.order.json` 里，显示版保存在 `.display/` 里（删掉可以重建）；
+- 不想用界面也可以：直接把图片放进照片目录，5 秒内自动上绳；手动放进去的照片如果没有显示版，打开详情页时会自动补生成；
+- 清空照片目录会恢复内置插画。
 
-> npm 与 GitHub 安装的包默认不带 `photos/` 目录（私人照片不会被打进包），需要自己新建这个文件夹。
+> **隐私**：照片只保存在本机 `$DSH_HOME/dsh-snap-line/photos/`，由本机 Harness 端口提供；插件不发起外部请求、不上传，也不写进 Git 或 npm 包。能访问该端口的本机进程可以看到这些图片。
 
-把图片放进去即可：
-
-- 按文件名自然排序（`1.jpg`、`2.jpg`、`10.jpg` 顺序正确），中文文件名同样支持；
-- 最多显示 6 张，更多照片会均匀抽取 6 张；
-- 增删或替换后 5 秒内自动刷新，无需重启 Harness；
-- 清空文件夹会恢复插件内置的插画照片。
-
-> **隐私**：`photos/` 中的照片不会进入 Git，也不会被打进 npm 包（见 `.gitignore` 与 `package.json` 的 `files`），可以放心放私人照片。照片只由本机 Harness 端口提供，插件不会上传；但能访问该端口的本机进程可以看到这些图片。
+> **从 1.3.x 升级**：旧版本放在插件包 `photos/` 里的照片不会自动迁移（npm 安装的包目录在升级时已经被替换），请在新版详情页里重新添加。卸载插件不会删除照片目录。
 
 ## 工作原理
 
 ```text
-photos/ ──Host 半 (index.js)── GET /dsh-snap-line/photos.json ──┐
-                                                                ├── Client 半 (client.js)
-photos/<name> ── GET /dsh-snap-line/photos/<name> ──────────────┘    └── SVG 晾衣绳 + 拍立得相框
+$DSH_HOME/dsh-snap-line/photos/
+├── <name>                  原图
+├── .display/<hash>.jpg     显示版（晾衣绳 / 缩略图用；灯箱仍用原图）
+└── .order.json             顺序（前 6 张上绳）
+
+详情页照片管理器 ── POST /dsh-snap-line/manage ──▶ Host 半 ──▶ 照片目录
+Client 半（晾衣绳 / 灯箱） ◀── GET /dsh-snap-line/photos.json、GET /dsh-snap-line/photos/<name> ── Host 半
 ```
 
-- **Host 半**（`index.js`）：用 `webServer.register({ kind: 'prefix', path: '/dsh-snap-line' })` 提供照片清单与图片。`lib/photos.js` 是纯 Node 实现，拒绝目录穿越、隐藏文件名和未知媒体类型，可独立测试；
-- **Client 半**（`client.js`）：注册到 `conversation.composer.dock` 插槽（`order: 2`），每 5 秒轮询一次清单，按清单渲染照片或内置插画；
+- **Host 半**（`index.js`）：`/dsh-snap-line` 前缀路由（`resource`，只处理 GET / HEAD）提供照片清单与图片；另有一个 `handler` 路由 `/dsh-snap-line/manage` 处理添加、删除、排序和显示版写入。写入端自己检查同源（`Origin` / `Sec-Fetch-Site`）、单张大小上限和图片 magic bytes，并用临时文件 + rename 原子写入；`lib/photos.js` 保持纯 Node、可独立单测；
+- **Client 半**（`client.js`）：照旧注册到 `conversation.composer.dock` 插槽（`order: 2`）与 `shell.overlay` 里的 Hero 版本，每 5 秒轮询一次清单；另外向插件管理页的 `plugins.bundle.config` 插槽注册照片管理器（按包名 keyed）；
+- **原图与显示版**：添加照片时在浏览器里用 canvas 生成显示版（长边 1280、JPEG 质量约 0.82）再上传，原图按原字节保存；晾衣绳和缩略图用显示版，灯箱用原图；GIF / AVIF 的显示版取首帧，原图保留动画；
+- **顺序**：`.order.json` 保存文件名数组，前 6 张上绳，没列进去的照片按文件名自然排序排在后面；写完之后客户端发一个窗口事件让晾衣绳立即刷新，5 秒轮询仍然作为兜底；
 - **灯箱**：点击照片（或 Tab 聚焦后按 Enter / 空格）打开；Esc、点击背景或关闭按钮退出，关闭后焦点回到打开它的照片，灯箱打开期间背景不滚动。
 - **新会话首页**：Host 只在有 Session 时渲染 `conversation.composer.dock`，空白 Hero 里只有一个空的 `[data-composer-dock]` 容器。Client 半额外向 `shell.overlay` 注册 `HeroClothesline`，每 250ms 检查页面里是否存在 `[data-content-phase="hero"] [data-composer-dock]`，若有则通过 `react-dom` 的 `createPortal` 把同一条晾衣绳画进该容器，并按量到的输入框宽度放大到 2 倍（600px 封顶）。进入正常会话、dock 版出现后自动让位，不会重复显示；拿不到 `react-dom` 或 `shell.overlay` 时静默跳过，不影响 dock 渲染；
 - dock 插槽本身是 fit-content 的 flex 行，SVG 的 `width: 100%` 会退回固有 300px，所以会话页晾衣绳一直是 300px 左右；Hero 版因此使用显式像素宽度，而不是改 `max-width`。
@@ -138,15 +140,16 @@ npm run check  # 语法检查 + 全部测试
 
 ```text
 dsh-snap-line/
-├── index.js            # Host 半：注册 /dsh-snap-line 前缀路由
-├── lib/photos.js       # 照片清单 / 读取 / 路由资源（纯 Node，可单独测试）
-├── client.js           # Client 半：晾衣绳 SVG、插槽注册、灯箱
+├── index.js            # Host 半：注册 /dsh-snap-line 读路由与 /dsh-snap-line/manage 写入端
+├── lib/photos.js       # 照片清单 / 读取 / 顺序 / 路由资源（纯 Node，可单独测试）
+├── client.js           # Client 半：晾衣绳 SVG、插槽注册、灯箱、照片管理器
 ├── cordis.patch.yml    # bundle 插入的 Host 插件行
 ├── locale/             # 插件管理器中显示的中英文标题与描述
 ├── icon.svg            # 插件列表里显示的矢量图标
 ├── screenshots.json    # 插件市场卡片用的截图清单（指向 docs/images）
-├── photos/             # 你自己的照片（默认不提交）
-├── docs/               # README 预览图、市场截图与 PNG 图标
+├── photos/             # 旧照片位置，1.4.0 起不再读取（见 photos/README.md）
+├── docs/               # README 预览图、市场截图、PNG 图标与 docs/adr
+├── GLOSSARY.md         # 项目术语表
 ├── test/               # node:test 测试
 └── .github/workflows/  # GitHub Actions CI
 ```
@@ -164,16 +167,19 @@ dsh-snap-line/
 ## 常见问题
 
 **放了照片但晾衣绳上没有变化？**
-先确认照片放进了上表对应的 `photos/` 目录，再等 5 秒（轮询间隔）。检查扩展名是否在支持列表内、文件名是否以 `.` 开头（隐藏文件会被忽略）。超过 6 张时只会均匀显示 6 张。
+先确认照片在 `$DSH_HOME/dsh-snap-line/photos/`（默认 `~/.dsh/dsh-snap-line/photos/`），或者能在详情页的照片管理器里看到它；再等 5 秒（轮询间隔）。检查扩展名是否在支持列表内、单张是否超过 25MB、文件名是否以 `.` 开头（隐藏文件会被忽略）。超过 6 张时只有顺序里的前 6 张上绳。
+
+**从 1.3.x 升级后原来的照片去哪了？**
+旧版本放在插件包 `photos/` 里的照片不会自动迁移 —— npm 安装的包目录在升级时已经被替换。请在新版详情页里重新添加（本地 `link:` 安装在仓库 `photos/` 里的文件还在，可以直接选它们）。
 
 **照片会被上传或公开吗？**
-不会。Photo 由本机 Harness web server 的同源路由提供，插件不发外部请求，也不会把照片写进 Git 或 npm 包。
+不会。照片只保存在本机照片目录，由本机 Harness web server 的同源路由提供，插件不发外部请求，也不会把照片写进 Git 或 npm 包。
 
 **会挡住消息输入框的点击吗？**
 不会。外层容器是 `pointer-events: none`，只有照片本身恢复指针事件，用于悬停与点击灯箱。
 
 **可以改照片数量或尺寸吗？**
-可以，在 `client.js` 中调整 `MAX_PHOTOS`（数量）、`HERO_SVG_WIDTH`（Hero 版宽度）、`TILTS` / `DELAYS` / `DURATIONS`（倾斜与摆动节奏）。
+顺序决定哪 6 张上绳，在详情页里拖动即可。上绳数量和 Hero 版宽度仍是代码常量（`MAX_PHOTOS`、`HERO_SVG_WIDTH`），倾斜与摆动节奏在 `TILTS` / `DELAYS` / `DURATIONS` 里调。
 
 **支持深色主题吗？**
 目前使用固定的暖色纸张配色，不随 Harness 主题切换；欢迎提交 PR。

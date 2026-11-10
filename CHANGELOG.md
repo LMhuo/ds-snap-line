@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Photo manager in the installed plugin's detail page (the `plugins.bundle.config`
+  slot, keyed by package name): multi-select add, delete, and drag-to-reorder.
+  The order decides which six photos hang on the rope.
+- Original and display copy: adding a photo generates a display copy in the
+  browser (1280px longest edge, JPEG, usually a few hundred KB); the clothesline
+  and list thumbnails use it, while the lightbox loads the original.
+- The order is persisted in the photo folder's `.order.json`, display copies in
+  `.display/`.
+- A write route at `/dsh-snap-line/manage` for adding, deleting, reordering and
+  display-copy writes: same-origin request policy, 25MB / 64MP per photo,
+  magic-byte validation, temp file + rename.
+- Hand-placed files are still picked up by the five-second poll; after a write
+  the clothesline refreshes immediately via a window event.
+- `docs/adr/0001-photos-live-in-dsh-home.md` and `GLOSSARY.md`.
+
+### Changed
+
+- Photos now live in `$DSH_HOME/dsh-snap-line/photos` (default
+  `~/.dsh/dsh-snap-line/photos`) instead of the package's `photos/` folder, so
+  installing an update no longer loses them.
+- The clothesline shows the first six photos in order; the previous even
+  sampling is gone. README, README.en and `photos/README.md` describe the new
+  location and workflow.
+
+### Removed
+
+- The package's `photos/` folder is no longer read. Photos left there when
+  upgrading from 1.3.x are not migrated; re-add them from the detail page.
+
 ## [1.3.1] - 2026-11-09
 
 ### Added

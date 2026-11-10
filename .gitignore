@@ -64,9 +64,13 @@ htmlcov/
 .DS_Store?
 
 # ---- SnapLine ----
-# 个人照片不进入版本库，只保留文件夹说明
+# 照片自 1.4.0 起存放在 $DSH_HOME/dsh-snap-line/photos（默认 ~/.dsh/...），
+# 这里只保留旧位置以免误提交个人照片，photos/README.md 是说明文件
 photos/*
 !photos/README.md
 
 # npm 打包产物
 *.tgz
+
+# ---- 本地 git worktree（ticket 实现用） ----
+.worktrees/

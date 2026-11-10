@@ -10,7 +10,7 @@
 [![npm](https://img.shields.io/npm/v/dsh-snap-line?logo=npm)](https://www.npmjs.com/package/dsh-snap-line)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-4d6bfe)](https://github.com/deepseek-ai)
 
-SnapLine is a UI bundle for [DeepSeek Harness](https://github.com/deepseek-ai). It draws a gently sagging clothesline just under the chat composer, hung with a row of polaroid photos that sway in the breeze. Five hand-drawn illustrations ship by default; drop your own images into `photos/` and they replace the illustrations within seconds, no restart needed.
+SnapLine is a UI bundle for [DeepSeek Harness](https://github.com/deepseek-ai). It draws a gently sagging clothesline just under the chat composer, hung with a row of polaroid photos that sway in the breeze. Five hand-drawn illustrations ship by default; add a few of your own photos in the installed plugin's detail page and they replace the illustrations within seconds, no restart needed.
 
 ![SnapLine preview](docs/images/preview.png)
 
@@ -31,9 +31,10 @@ SnapLine is a UI bundle for [DeepSeek Harness](https://github.com/deepseek-ai). 
 ## Features
 
 - **Two places, one artwork**: hangs in the conversation's `conversation.composer.dock` slot (tight under the composer, never covering controls) and on the blank New Session hero;
-- **Five built-in illustrations**: the line is never empty when `photos/` has no images;
-- **Your own photos**: `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`, natural filename order, live refresh within five seconds after adding, removing or replacing files;
-- **Adaptive layout**: up to six photos, evenly sampled when there are more; the more photos, the tighter they sit, each with its own tilt and sway rhythm;
+- **Five built-in illustrations**: the line is never empty when the photo folder has no images;
+- **Manage your own photos in the plugin detail page**: multi-select add, delete, drag to reorder, and the first six photos hang on the rope; `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`;
+- **Adaptive layout**: up to six photos; the more photos, the tighter they sit, each with its own tilt and sway rhythm;
+- **Original and display copy**: the clothesline and list thumbnails load a few-hundred-KB display copy, while the lightbox loads the original;
 - **Restrained interaction**: hovering only uses CSS `:hover` and `transform` to give a photo a small nudge that settles back; clicking opens a lightbox — no mouse listeners, no extra re-renders;
 - **Keyboard friendly**: photos are focusable with Tab and open the lightbox with Enter or Space; while the lightbox is open Tab stays on its close button, Escape / backdrop / close button all dismiss it, and focus returns to the photo that opened it;
 - **Named for screen readers**: the clothesline, every photo, the lightbox and its close button carry bilingual Chinese/English accessible names;
@@ -91,34 +92,35 @@ Then ask the Harness agent to install that directory's **absolute path** with `i
 
 ## Use your own photos
 
-The photo folder is **`photos/` inside the plugin package**:
+Photos are managed in the **installed plugin's detail page**: sidebar **Plugins → Installed plugins → dsh-snap-line**. The photo manager there adds (multi-select), deletes and reorders photos by dragging. Order decides what hangs: **the first six photos are on the rope**, the rest stay in the list.
 
-| Install style | Photo folder |
-| --- | --- |
-| Local directory / `link:` | `photos/` in this repository |
-| npm / GitHub install | `~/.dsh/profiles/<profile>/node_modules/dsh-snap-line/photos/` |
+- Photos live in `$DSH_HOME/dsh-snap-line/photos/` (default `~/.dsh/dsh-snap-line/photos/`), not inside the plugin package, so upgrading the plugin never loses them;
+- `.jpg` `.jpeg` `.png` `.webp` `.gif` `.avif`; at most 25MB and 64 megapixels per photo; iPhone HEIC files must be exported to JPEG first;
+- The clothesline and list thumbnails load a **display copy** (1280px longest edge, JPEG, usually a few hundred KB); the lightbox loads the **original**;
+- The order lives in `.order.json` in the photo folder, display copies in `.display/` (safe to delete, they are rebuilt);
+- You can skip the UI: drop images straight into the photo folder and they show up within five seconds; a hand-placed photo without a display copy gets one when you next open the detail page;
+- Clearing the photo folder brings the built-in illustrations back.
 
-> npm and GitHub installs ship without a `photos/` folder (private photos are never packed), so create that folder yourself.
+> **Privacy**: photos stay in the local `$DSH_HOME/dsh-snap-line/photos/` folder and are served by the local Harness port. The plugin makes no external requests, never uploads them, and never writes them into Git or the npm tarball. Any local process that can reach that port can still read them.
 
-Drop images in and that's it:
-
-- Sorted by natural filename order (`1.jpg`, `2.jpg`, `10.jpg` — correctly ordered); non-ASCII filenames work too;
-- Up to six photos are shown; extras are evenly sampled;
-- Added, removed or replaced files show up within five seconds, no restart;
-- An empty folder brings back the built-in illustrations.
-
-> **Privacy**: images in `photos/` never enter Git and are never packed into the npm tarball (see `.gitignore` and `files` in `package.json`), so private photos are fine. They are served only by the local Harness port and never uploaded — but any local process that can reach that port can read them.
+> **Upgrading from 1.3.x**: photos left in the old package `photos/` folder are not migrated (an npm install's package folder is already replaced during the upgrade); re-add them in the new detail page. Uninstalling the plugin does not delete the photo folder.
 
 ## How it works
 
 ```text
-photos/ ── Host half (index.js) ── GET /dsh-snap-line/photos.json ──┐
-                                                                    ├── Client half (client.js)
-photos/<name> ── GET /dsh-snap-line/photos/<name> ──────────────────┘    └── SVG clothesline + polaroid frames
+$DSH_HOME/dsh-snap-line/photos/
+├── <name>                  original
+├── .display/<hash>.jpg     display copy (clothesline / thumbnails; the lightbox still uses the original)
+└── .order.json             order (the first six hang on the rope)
+
+photo manager (detail page) ── POST /dsh-snap-line/manage ──▶ Host half ──▶ photo folder
+Client half (clothesline / lightbox) ◀── GET /dsh-snap-line/photos.json, GET /dsh-snap-line/photos/<name> ── Host half
 ```
 
-- **Host half** (`index.js`): registers a `kind: 'prefix'` route at `/dsh-snap-line` for the photo manifest and the images. `lib/photos.js` is plain Node and rejects path traversal, hidden filenames and unknown media types, so it is unit-testable on its own;
-- **Client half** (`client.js`): registers in the `conversation.composer.dock` slot (`order: 2`) and polls the manifest every five seconds, rendering user photos or the built-in illustrations;
+- **Host half** (`index.js`): the `/dsh-snap-line` prefix route (`resource`, GET / HEAD only) serves the photo manifest and the images; a separate `handler` route at `/dsh-snap-line/manage` handles adding, deleting, ordering and display-copy writes. The write side checks same-origin (`Origin` / `Sec-Fetch-Site`) request policy itself, enforces the per-photo size cap and image magic bytes, and writes atomically via temp file + rename. `lib/photos.js` stays plain Node and unit-testable;
+- **Client half** (`client.js`): keeps registering `conversation.composer.dock` (`order: 2`) and the `shell.overlay` hero copy, polls the manifest every five seconds, and now also registers the photo manager on the plugin manager page's `plugins.bundle.config` slot (keyed by package name);
+- **Original and display copy**: adding a photo generates a display copy in the browser with canvas (1280px longest edge, JPEG quality ≈ 0.82) and uploads it, while the original is stored byte-for-byte; the clothesline and thumbnails use the display copy, the lightbox uses the original; GIF / AVIF display copies use the first frame and keep the original's animation;
+- **Order**: `.order.json` holds the filename array; the first six hang on the rope and unlisted photos follow in natural filename order. After a write the client dispatches a window event so the clothesline refreshes immediately, with the five-second poll as fallback;
 - **Lightbox**: open it by clicking a photo, or by focusing one with Tab and pressing Enter / Space; Escape, the backdrop or the close button dismiss it, focus returns to the photo, and the page behind it does not scroll while it is open.
 - **New Session hero**: the Host renders `conversation.composer.dock` only for an active Session, so the blank hero has just an empty `[data-composer-dock]` container. The Client half also registers `HeroClothesline` on `shell.overlay`, checks every 250 ms for `[data-content-phase="hero"] [data-composer-dock]`, and portals the same clothesline into it via `react-dom`'s `createPortal`, scaled to 2× the measured composer width (capped at 600px). Once a real conversation mounts its dock entry, the hero copy steps aside; if `react-dom` or `shell.overlay` is unavailable it silently skips, leaving the normal dock rendering intact;
 - the dock slot is a fit-content flex row, so an SVG with `width: 100%` collapses to its intrinsic 300px — the conversation clothesline stays ~300px wide. The hero copy therefore uses an explicit pixel width instead of `max-width`.
@@ -138,15 +140,16 @@ For local debugging, install this repository as a `link:` bundle (option 3) so e
 
 ```text
 dsh-snap-line/
-├── index.js            # Host half: registers the /dsh-snap-line prefix route
-├── lib/photos.js       # Photo listing / reading / route resource (plain Node, unit-tested)
-├── client.js           # Client half: clothesline SVG, slot registration, lightbox
+├── index.js            # Host half: read routes at /dsh-snap-line and the /dsh-snap-line/manage write side
+├── lib/photos.js       # Photo listing / reading / order / route resource (plain Node, unit-tested)
+├── client.js           # Client half: clothesline SVG, slot registration, lightbox, photo manager
 ├── cordis.patch.yml    # Host plugin row inserted by the bundle
 ├── locale/             # English and Chinese display metadata for the plugin manager
 ├── icon.svg            # Vector icon shown in the plugin list
 ├── screenshots.json    # Market screenshot list (points at docs/images)
-├── photos/             # Your photos (not committed by default)
-├── docs/               # README previews, market screenshots and the PNG icon
+├── photos/             # Legacy photo folder, not read since 1.4.0 (see photos/README.md)
+├── docs/               # README previews, market screenshots, the PNG icon and docs/adr
+├── GLOSSARY.md         # Project glossary
 ├── test/               # node:test suites
 └── .github/workflows/  # GitHub Actions CI
 ```
@@ -164,16 +167,19 @@ The plugin declares `engines.dsh: ^0.2.0` in `package.json`: a Harness outside t
 ## FAQ
 
 **I added photos but the clothesline did not change.**
-Make sure they are in the `photos/` folder from the table above, then wait five seconds (the polling interval). Check that the extension is supported and the filename does not start with `.` (hidden files are ignored). With more than six photos only six are shown, evenly sampled.
+Make sure they are in `$DSH_HOME/dsh-snap-line/photos/` (default `~/.dsh/dsh-snap-line/photos/`), or that the detail page's photo manager lists them, then wait five seconds (the polling interval). Check that the extension is supported, the photo is at most 25MB, and the filename does not start with `.` (hidden files are ignored). With more than six photos only the first six in the order hang on the rope.
+
+**Where did my photos go after upgrading from 1.3.x?**
+Photos in the old package `photos/` folder are not migrated — an npm install's package folder is already replaced during the upgrade. Re-add them in the new detail page (for a local `link:` install the files in the repository's `photos/` are still there, so you can pick them directly).
 
 **Are my photos uploaded or published?**
-No. They are served by the local Harness web server over a same-origin route; the plugin makes no external requests and never writes photos into Git or the npm tarball.
+No. They stay in the local photo folder and are served by the local Harness web server over a same-origin route; the plugin makes no external requests and never writes photos into Git or the npm tarball.
 
 **Does it block clicks on the composer?**
 No. The wrapper is `pointer-events: none`; only the photo frames opt back in for hover and the lightbox click.
 
 **Can I change the number or size of photos?**
-Yes — edit `MAX_PHOTOS` (count), `HERO_SVG_WIDTH` (hero width) and `TILTS` / `DELAYS` / `DURATIONS` (tilt and sway rhythm) in `client.js`.
+Order decides which six hang — drag them in the detail page. The rope count and hero width are still code constants (`MAX_PHOTOS`, `HERO_SVG_WIDTH`), and `TILTS` / `DELAYS` / `DURATIONS` tune the tilt and sway rhythm.
 
 **Does it support dark theme?**
 Currently it uses a fixed warm paper palette and does not follow the Harness theme. PRs welcome.
