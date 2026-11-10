@@ -136,12 +136,14 @@ npm run check  # 语法检查 + 全部测试
 
 本地调试时推荐用上面的「方式三」以 `link:` 方式安装本仓库，这样改代码即时生效。
 
+术语表见 [GLOSSARY.md](GLOSSARY.md)；照片为什么存放在用户数据目录的决策见 [ADR 0001](docs/adr/0001-photos-live-in-dsh-home.md)。
+
 ### 目录结构
 
 ```text
 dsh-snap-line/
 ├── index.js            # Host 半：注册 /dsh-snap-line 读路由与 /dsh-snap-line/manage 写入端
-├── lib/photos.js       # 照片清单 / 读取 / 顺序 / 路由资源（纯 Node，可单独测试）
+├── lib/photos.js       # 照片清单、原图/显示版读取、顺序、校验与写入动作（纯 Node，可单独测试）
 ├── client.js           # Client 半：晾衣绳 SVG、插槽注册、灯箱、照片管理器
 ├── cordis.patch.yml    # bundle 插入的 Host 插件行
 ├── locale/             # 插件管理器中显示的中英文标题与描述
@@ -179,7 +181,7 @@ dsh-snap-line/
 不会。外层容器是 `pointer-events: none`，只有照片本身恢复指针事件，用于悬停与点击灯箱。
 
 **可以改照片数量或尺寸吗？**
-顺序决定哪 6 张上绳，在详情页里拖动即可。上绳数量和 Hero 版宽度仍是代码常量（`MAX_PHOTOS`、`HERO_SVG_WIDTH`），倾斜与摆动节奏在 `TILTS` / `DELAYS` / `DURATIONS` 里调。
+顺序决定哪 6 张上绳，在详情页里拖动即可。上绳数量是 Host 常量 `MAX_ON_ROPE`（`lib/photos.js`），Hero 版宽度是 Client 常量 `HERO_SVG_WIDTH`，倾斜与摆动节奏在 `TILTS` / `DELAYS` / `DURATIONS` 里调。
 
 **支持深色主题吗？**
 目前使用固定的暖色纸张配色，不随 Harness 主题切换；欢迎提交 PR。

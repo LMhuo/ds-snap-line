@@ -136,12 +136,14 @@ No build step and no runtime dependencies. Editing `client.js` hot-reloads the b
 
 For local debugging, install this repository as a `link:` bundle (option 3) so edits take effect immediately.
 
+The project glossary is [GLOSSARY.md](GLOSSARY.md); the decision behind the photo folder is [ADR 0001](docs/adr/0001-photos-live-in-dsh-home.md).
+
 ### Repository layout
 
 ```text
 dsh-snap-line/
 ├── index.js            # Host half: read routes at /dsh-snap-line and the /dsh-snap-line/manage write side
-├── lib/photos.js       # Photo listing / reading / order / route resource (plain Node, unit-tested)
+├── lib/photos.js       # Photo manifest, original/display reading, order, validation and write actions (plain Node, unit-tested)
 ├── client.js           # Client half: clothesline SVG, slot registration, lightbox, photo manager
 ├── cordis.patch.yml    # Host plugin row inserted by the bundle
 ├── locale/             # English and Chinese display metadata for the plugin manager
@@ -179,7 +181,7 @@ No. They stay in the local photo folder and are served by the local Harness web 
 No. The wrapper is `pointer-events: none`; only the photo frames opt back in for hover and the lightbox click.
 
 **Can I change the number or size of photos?**
-Order decides which six hang — drag them in the detail page. The rope count and hero width are still code constants (`MAX_PHOTOS`, `HERO_SVG_WIDTH`), and `TILTS` / `DELAYS` / `DURATIONS` tune the tilt and sway rhythm.
+Order decides which six hang — drag them in the detail page. The rope count is the Host constant `MAX_ON_ROPE` (`lib/photos.js`); the hero width is the Client constant `HERO_SVG_WIDTH`; `TILTS` / `DELAYS` / `DURATIONS` tune the tilt and sway rhythm.
 
 **Does it support dark theme?**
 Currently it uses a fixed warm paper palette and does not follow the Harness theme. PRs welcome.

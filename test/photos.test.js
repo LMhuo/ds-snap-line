@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { chmod, mkdtemp, mkdir, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import {
   createManageResource,
   createPhotoResource,
@@ -16,9 +16,16 @@ import {
 } from '../lib/photos.js'
 import { apply } from '../index.js'
 
-/* Magic bytes only; the route never looks inside the image. */
+/* Magic bytes only; the read route never looks inside the image. */
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46])
+/* A complete-enough JPEG: SOI, one APP0 segment and EOI. */
+const JPEG = Buffer.concat([
+  Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
+  Buffer.from('JFIF\u0000', 'latin1'),
+  Buffer.from([0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00]),
+  Buffer.from([0xff, 0xd9]),
+])
+const JPEG_EOI = Buffer.from([0xff, 0xd9])
 
 async function makeFixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-snap-line-'))
@@ -118,6 +125,24 @@ test('photoFolder falls back to ~/.dsh when DSH_HOME is missing, blank or padded
   }
 })
 
+test('photoFolder expands ~ and resolves the result to an absolute path', () => {
+  assert.equal(
+    photoFolder({ DSH_HOME: '~' }, '/home/tester'),
+    join('/home/tester', 'dsh-snap-line', 'photos'),
+  )
+  assert.equal(
+    photoFolder({ DSH_HOME: '~/pictures' }, '/home/tester'),
+    join('/home/tester', 'pictures', 'dsh-snap-line', 'photos'),
+  )
+  assert.equal(
+    photoFolder({ DSH_HOME: join('/home/tester', 'pictures') }, '/home/tester'),
+    join('/home/tester', 'pictures', 'dsh-snap-line', 'photos'),
+  )
+  const relative = photoFolder({ DSH_HOME: 'relative-home' }, '/home/tester')
+  assert.equal(relative, resolve('relative-home', 'dsh-snap-line', 'photos'))
+  assert.equal(isAbsolute(relative), true)
+})
+
 test('listPhotos lists supported images in natural name order', async (t) => {
   const dir = await makeFixture(t)
   const listing = await listPhotos(dir)
@@ -193,6 +218,65 @@ test('listPhotos falls back to the original when a display copy is corrupted', a
     const photo = listing.photos.find((entry) => entry.name === 'photo 2.png')
     assert.equal(photo.displayUrl, photo.originalUrl, `fallback for ${corrupted.length} bytes`)
   }
+})
+
+test('listPhotos falls back to the original when a display copy is truncated or has no EOI', async (t) => {
+  const { dir } = await makeOrderedFixture(t)
+  const copy = join(dir, '.display', displayFileName('photo 2.png'))
+  const older = new Date(Date.now() - 60_000)
+  await utimes(join(dir, 'photo 2.png'), older, older)
+
+  for (const corrupted of [
+    /* Starts with a JPEG SOI, so the old three-byte check accepted it. */
+    Buffer.concat([JPEG.subarray(0, 3), Buffer.from('truncated')]),
+    JPEG.subarray(0, JPEG.length - 2),
+  ]) {
+    await writeFile(copy, corrupted)
+    const newer = new Date()
+    await utimes(copy, newer, newer)
+    const listing = await listPhotos(dir)
+    const photo = listing.photos.find((entry) => entry.name === 'photo 2.png')
+    assert.equal(photo.displayUrl, photo.originalUrl, `fallback for ${corrupted.length} bytes`)
+  }
+})
+
+test('listPhotos accepts a display copy that is exactly as new as the original', async (t) => {
+  const dir = await makePhotoDir(t, ['a.png'])
+  await mkdir(join(dir, '.display'))
+  const stamp = new Date(Date.now() - 5_000)
+  await utimes(join(dir, 'a.png'), stamp, stamp)
+  const copy = join(dir, '.display', displayFileName('a.png'))
+  await writeFile(copy, JPEG)
+  await utimes(copy, stamp, stamp)
+
+  const listing = await listPhotos(dir)
+  const photo = listing.photos.find((entry) => entry.name === 'a.png')
+  assert.notEqual(photo.displayUrl, photo.originalUrl)
+})
+
+test('listPhotos falls back to the original when a display copy is older than the original', async (t) => {
+  const dir = await makePhotoDir(t, ['a.png'])
+  await mkdir(join(dir, '.display'))
+  const original = join(dir, 'a.png')
+  const copy = join(dir, '.display', displayFileName('a.png'))
+  const base = Date.now() - 60_000
+  await utimes(original, new Date(base), new Date(base))
+  await writeFile(copy, JPEG)
+  await utimes(copy, new Date(base + 1_000), new Date(base + 1_000))
+
+  const before = await listPhotos(dir)
+  const beforePhoto = before.photos.find((entry) => entry.name === 'a.png')
+  assert.notEqual(beforePhoto.displayUrl, beforePhoto.originalUrl, 'a fresh display copy is used')
+
+  /* The user replaces the original by hand, leaving the old display copy behind. */
+  await writeFile(original, Buffer.concat([PNG, Buffer.from('replaced')]))
+  const replaced = new Date(base + 5_000)
+  await utimes(original, replaced, replaced)
+
+  const after = await listPhotos(dir)
+  const afterPhoto = after.photos.find((entry) => entry.name === 'a.png')
+  assert.equal(afterPhoto.displayUrl, afterPhoto.originalUrl, 'the stale display copy is ignored')
+  assert.notEqual(after.revision, before.revision)
 })
 
 test('servePhoto returns bytes with the media type and no-sniff header', async (t) => {
@@ -388,6 +472,67 @@ function pngOfSize(width, height) {
   return header
 }
 
+/** A JPEG with an APP0 segment and a SOF0 that declares the requested pixel size. */
+function jpegOfSize(width, height) {
+  const bytes = Buffer.alloc(30)
+  bytes.writeUInt16BE(0xffd8, 0) // SOI
+  bytes.writeUInt16BE(0xffe0, 2) // APP0
+  bytes.writeUInt16BE(0x0010, 4) // segment length
+  bytes.writeUInt16BE(0xffc0, 20) // SOF0
+  bytes.writeUInt16BE(0x0011, 22) // segment length
+  bytes[24] = 8 // sample precision
+  bytes.writeUInt16BE(height, 25)
+  bytes.writeUInt16BE(width, 27)
+  return bytes
+}
+
+/** A GIF header that declares the requested logical-screen size. */
+function gifOfSize(width, height) {
+  const header = Buffer.alloc(10)
+  header.write('GIF89a', 0, 'latin1')
+  header.writeUInt16LE(width, 6)
+  header.writeUInt16LE(height, 8)
+  return header
+}
+
+/** A RIFF/WebP VP8 key-frame header with the requested encoded size. */
+function webpOfSize(width, height) {
+  const bytes = Buffer.alloc(30)
+  bytes.write('RIFF', 0, 'latin1')
+  bytes.writeUInt32LE(22, 4)
+  bytes.write('WEBP', 8, 'latin1')
+  bytes.write('VP8 ', 12, 'latin1')
+  bytes.writeUInt32LE(10, 16)
+  bytes[23] = 0x9d
+  bytes[24] = 0x01
+  bytes[25] = 0x2a
+  bytes.writeUInt16LE(width & 0x3fff, 26)
+  bytes.writeUInt16LE(height & 0x3fff, 28)
+  return bytes
+}
+
+/** An AVIF `ftyp` box followed by an `ispe` box declaring the requested size. */
+function avifOfSize(width, height) {
+  const bytes = Buffer.alloc(36)
+  bytes.writeUInt32BE(16, 0)
+  bytes.write('ftyp', 4, 'latin1')
+  bytes.write('avif', 8, 'latin1')
+  bytes.writeUInt32BE(20, 16)
+  bytes.write('ispe', 20, 'latin1')
+  bytes.writeUInt32BE(0, 24) // version and flags
+  bytes.writeUInt32BE(width, 28)
+  bytes.writeUInt32BE(height, 32)
+  return bytes
+}
+
+const SIZED_IMAGE_CASES = [
+  ['photo.jpg', 'image/jpeg', jpegOfSize],
+  ['photo.png', 'image/png', pngOfSize],
+  ['photo.gif', 'image/gif', gifOfSize],
+  ['photo.webp', 'image/webp', webpOfSize],
+  ['photo.avif', 'image/avif', avifOfSize],
+]
+
 test('manage add stores the original bytes and the manifest lists the photo on the rope', async (t) => {
   const dir = await makeWritableDir(t)
   const bytes = Buffer.concat([pngOfSize(2, 2), Buffer.from('original-photo-bytes')])
@@ -408,9 +553,9 @@ test('manage add stores the original bytes and the manifest lists the photo on t
 test('manage add renames a duplicate instead of overwriting it', async (t) => {
   const dir = await makeWritableDir(t)
   const resource = manageResource(dir)
-  const first = Buffer.concat([PNG, Buffer.from('first')])
-  const second = Buffer.concat([PNG, Buffer.from('second')])
-  const third = Buffer.concat([PNG, Buffer.from('third')])
+  const first = Buffer.concat([pngOfSize(2, 2), Buffer.from('first')])
+  const second = Buffer.concat([pngOfSize(2, 2), Buffer.from('second')])
+  const third = Buffer.concat([pngOfSize(2, 2), Buffer.from('third')])
 
   assert.deepEqual(await (await resource(addRequest('a.png', first))).json(), { ok: true, name: 'a.png' })
   assert.deepEqual(await (await resource(addRequest('a.png', second))).json(), { ok: true, name: 'a-2.png' })
@@ -432,13 +577,70 @@ test('manage add refuses a body over 25MB with 413 and writes nothing', async (t
   assert.deepEqual(await readdir(dir), [])
 })
 
-test('manage add refuses a photo over 64MP with 413 and writes nothing', async (t) => {
+test('manage add accepts every supported format whose dimensions parse', async (t) => {
   const dir = await makeWritableDir(t)
-  const response = await manageResource(dir)(addRequest('huge.png', pngOfSize(10_000, 10_000)))
+  const resource = manageResource(dir)
 
-  assert.equal(response.status, 413)
-  assert.equal((await response.json()).error, 'too-many-pixels')
+  for (const [name, contentType, make] of SIZED_IMAGE_CASES) {
+    const response = await resource(addRequest(name, make(2, 2), { contentType }))
+    assert.equal(response.status, 200, `accepted ${contentType}`)
+    assert.deepEqual(await response.json(), { ok: true, name })
+  }
+  assert.deepEqual((await readdir(dir)).sort(), SIZED_IMAGE_CASES.map(([name]) => name).sort())
+})
+
+test('manage add refuses a photo over 64MP in every supported format with 413 and writes nothing', async (t) => {
+  const dir = await makeWritableDir(t)
+  const resource = manageResource(dir)
+
+  for (const [name, contentType, make] of SIZED_IMAGE_CASES) {
+    const response = await resource(addRequest(name, make(10_000, 10_000), { contentType }))
+    assert.equal(response.status, 413, `rejected ${contentType}`)
+    assert.equal((await response.json()).error, 'too-many-pixels', `error for ${contentType}`)
+  }
   assert.deepEqual(await readdir(dir), [])
+})
+
+test('manage add refuses an accepted image whose dimensions cannot be read with 400', async (t) => {
+  const dir = await makeWritableDir(t)
+  const resource = manageResource(dir)
+
+  const cases = [
+    /* PNG signature only: no IHDR. */
+    ['broken.png', 'image/png', PNG],
+    /* SOI plus APP0, but no SOF0. */
+    ['broken.jpg', 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x00, 0x00])],
+    /* AVIF ftyp without the ispe box. */
+    ['broken.avif', 'image/avif', Buffer.from([
+      0x00, 0x00, 0x00, 0x10, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
+      0x00, 0x00, 0x00, 0x00,
+    ])],
+  ]
+  for (const [name, contentType, bytes] of cases) {
+    const response = await resource(addRequest(name, bytes, { contentType }))
+    assert.equal(response.status, 400, `expected 400 for ${name}`)
+    assert.equal((await response.json()).error, 'invalid-image', `error for ${name}`)
+  }
+  assert.deepEqual(await readdir(dir), [])
+})
+
+test('manage add accepts the media-type aliases browsers use', async (t) => {
+  const dir = await makeWritableDir(t)
+  const resource = manageResource(dir)
+  const cases = [
+    ['alias-jpg.jpg', 'image/jpg'],
+    ['alias-pjpeg.jpg', 'image/pjpeg'],
+    ['alias-x-jpeg.jpeg', 'image/x-jpeg'],
+    ['alias-params.jpg', 'IMAGE/JPEG; charset=binary'],
+    ['alias-x-png.png', 'image/x-png'],
+  ]
+  for (const [name, contentType] of cases) {
+    const bytes = name.endsWith('.png') ? pngOfSize(2, 2) : jpegOfSize(2, 2)
+    const response = await resource(addRequest(name, bytes, { contentType }))
+    assert.equal(response.status, 200, `accepted ${contentType}`)
+    assert.deepEqual(await response.json(), { ok: true, name }, `response for ${contentType}`)
+  }
+  assert.deepEqual((await readdir(dir)).sort(), cases.map(([name]) => name).sort())
 })
 
 test('manage add refuses unsupported media types with 415', async (t) => {
@@ -520,7 +722,7 @@ test('manage add leaves no partial file when the write fails', async (t) => {
   }
   await chmod(dir, 0o500)
   try {
-    const response = await manageResource(dir)(addRequest('a.png', PNG))
+    const response = await manageResource(dir)(addRequest('a.png', pngOfSize(2, 2)))
     assert.equal(response.status, 500)
     assert.equal((await response.json()).error, 'write-failed')
     assert.deepEqual(await readdir(dir), [])
@@ -532,7 +734,7 @@ test('manage add leaves no partial file when the write fails', async (t) => {
 test('manage display stores a hidden display copy that the manifest and read route serve', async (t) => {
   const dir = await makeWritableDir(t)
   await writeFile(join(dir, 'a.png'), PNG)
-  const display = Buffer.concat([JPEG, Buffer.from('display-copy')])
+  const display = Buffer.concat([JPEG.subarray(0, JPEG.length - 2), Buffer.from('display-copy'), JPEG_EOI])
 
   const response = await manageResource(dir)(displayRequest('a.png', display))
   assert.equal(response.status, 200)
@@ -677,6 +879,16 @@ test('manage delete refuses traversal, hidden, malformed and over-long names', a
   assert.equal(unknownType.status, 404)
   assert.equal((await unknownType.json()).error, 'not-found')
   assert.deepEqual((await readdir(dir)).sort(), ['a.png', 'notes.txt'])
+})
+
+test('manage display accepts the image/jpg alias for its JPEG body', async (t) => {
+  const dir = await makeWritableDir(t)
+  await writeFile(join(dir, 'a.png'), PNG)
+
+  const response = await manageResource(dir)(displayRequest('a.png', JPEG, { contentType: 'image/jpg' }))
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { ok: true, name: 'a.png' })
+  assert.deepEqual(await readFile(join(dir, '.display', displayFileName('a.png'))), JPEG)
 })
 
 test('manage display only accepts JPEG bytes declared as image/jpeg', async (t) => {
